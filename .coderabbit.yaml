@@ -4,7 +4,7 @@ language: en-US
 early_access: false
 enable_free_tier: true
 
-# 🧠 Knowledge base
+#  Knowledge base
 knowledge_base:
   opt_out: false
   web_search:
@@ -23,14 +23,14 @@ knowledge_base:
   pull_requests:
     scope: auto
 
-# 🎓 Tone (mentor style)
+#  Tone (mentor style)
 tone_instructions: |
-  Senior backend engineer mentoring a developer building a legal AI system (CM.LAW).
+  Senior backend engineer mentoring a developer building a legal AI system (237law).
   Always explain WHY a pattern is better, not just WHAT to change.
   Focus on backend architecture, NestJS best practices, Prisma usage, and AI/RAG correctness.
   Guide the developer to think like a system designer.
 
-# 🧾 Code generation focus
+#  Code generation focus
 code_generation:
   docstrings:
     language: en-US
@@ -48,11 +48,11 @@ code_generation:
           Guide unit testing for NestJS services and controllers.
           Emphasize mocking Prisma, testing business logic, and edge cases.
 
-# 💬 Chat
+#  Chat
 chat:
   auto_reply: true
 
-# 🔍 Reviews
+#  Reviews
 reviews:
   profile: assertive
   request_changes_workflow: true
@@ -63,18 +63,18 @@ reviews:
   collapse_walkthrough: false
   changed_files_summary: true
 
-  # 🔥 CRITICAL: review ALL branches
+  #  CRITICAL: review ALL branches
   auto_review:
     enabled: true
     auto_incremental_review: true
     drafts: false
     base_branches:
-      - "**"   # 👈 THIS ensures all branches are reviewed
+      - "**"   #  THIS ensures all branches are reviewed
     ignore_title_keywords:
       - "wip"
       - "draft"
 
-  # 🧠 Architecture + AI rules
+  #  Architecture + AI rules
   path_instructions:
 
     - path: "src/**/*.ts"
@@ -106,10 +106,10 @@ reviews:
         Review AI and RAG pipeline.
 
         Detect BAD patterns:
-        - No chunking before embeddings ❌
-        - Embedding full documents ❌
-        - Missing context retrieval ❌
-        - Recomputing embeddings unnecessarily ❌
+        - No chunking before embeddings 
+        - Embedding full documents 
+        - Missing context retrieval 
+        - Recomputing embeddings unnecessarily 
 
         Enforce GOOD patterns:
         - Chunk text before embedding
@@ -158,7 +158,7 @@ reviews:
         - Use correct data types
         - Ensure indexing for performance
 
-# ⚖️ Legal citation enforcement
+#  Legal citation enforcement
   labeling_instructions:
     - label: "missing-legal-citation"
       instructions: "Apply when AI responses do not reference article numbers or legal sources"
@@ -172,7 +172,7 @@ reviews:
     - label: "performance-issue"
       instructions: "Apply when inefficient DB or vector operations are detected"
 
-# 🚫 Ignore noise
+# Ignore noise
   path_filters:
     - "!node_modules/**"
     - "!dist/**"
@@ -180,23 +180,23 @@ reviews:
     - "!*.log"
     - "!package-lock.json"
 
-# 🧪 Tools
+#  Tools
   tools:
     eslint:
       enabled: true
     actionlint:
       enabled: true
 
-# 🧠 Learning
+#  Learning
 learning:
   enabled: true
 
-# ✨ Finishing touches
+#  Finishing touches
   finishing_touches:
     docstrings:
       enabled: true
     unit_tests:
       enabled: true
 
-# 🏷 Auto labels
+#  Auto labels
   auto_apply_labels: true
