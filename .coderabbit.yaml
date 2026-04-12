@@ -1,0 +1,202 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+early_access: false
+enable_free_tier: true
+
+# 🧠 Knowledge base
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.json"
+      - "**/*.md"
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto
+
+# 🎓 Tone (mentor style)
+tone_instructions: |
+  Senior backend engineer mentoring a developer building a legal AI system (CM.LAW).
+  Always explain WHY a pattern is better, not just WHAT to change.
+  Focus on backend architecture, NestJS best practices, Prisma usage, and AI/RAG correctness.
+  Guide the developer to think like a system designer.
+
+# 🧾 Code generation focus
+code_generation:
+  docstrings:
+    language: en-US
+    path_instructions:
+      - path: "src/**/*.ts"
+        instructions: |
+          Document services, controllers, and modules.
+          Explain responsibilities, dependencies, and design decisions.
+          Highlight how the code fits into the overall architecture.
+
+  unit_tests:
+    path_instructions:
+      - path: "**/*.spec.ts"
+        instructions: |
+          Guide unit testing for NestJS services and controllers.
+          Emphasize mocking Prisma, testing business logic, and edge cases.
+
+# 💬 Chat
+chat:
+  auto_reply: true
+
+# 🔍 Reviews
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  fail_commit_status: true
+  collapse_walkthrough: false
+  changed_files_summary: true
+
+  # 🔥 CRITICAL: review ALL branches
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - "**"   # 👈 THIS ensures all branches are reviewed
+    ignore_title_keywords:
+      - "wip"
+      - "draft"
+
+  # 🧠 Architecture + AI rules
+  path_instructions:
+
+    - path: "src/**/*.ts"
+      instructions: |
+        Review NestJS backend architecture.
+
+        Enforce:
+        - Controllers should be thin (no business logic)
+        - Services should contain logic
+        - Use dependency injection properly
+        - Modules must be well-separated
+
+        Clean Architecture:
+        - Separate ingestion, ai, law, prisma layers
+        - Avoid tight coupling between modules
+        - Ensure single responsibility per service
+
+        Prisma:
+        - Use PrismaService, not PrismaClient directly
+        - Avoid raw SQL unless necessary
+        - Prevent N+1 queries
+
+        Performance:
+        - Avoid DB calls inside loops
+        - Suggest batching
+
+    - path: "src/ai/**/*.ts"
+      instructions: |
+        Review AI and RAG pipeline.
+
+        Detect BAD patterns:
+        - No chunking before embeddings ❌
+        - Embedding full documents ❌
+        - Missing context retrieval ❌
+        - Recomputing embeddings unnecessarily ❌
+
+        Enforce GOOD patterns:
+        - Chunk text before embedding
+        - Retrieve top-k similar documents
+        - Pass structured context to LLM
+        - Avoid hallucination
+
+        Ensure prompts:
+        - Are deterministic
+        - Include instructions to cite laws
+
+    - path: "src/ingestion/**/*.ts"
+      instructions: |
+        Review PDF ingestion and parsing logic.
+
+        Enforce:
+        - Proper parsing of legal structure (Article, Section, Chapter)
+        - Avoid storing raw unstructured text
+        - Ensure chunking logic exists
+
+    - path: "src/law/**/*.ts"
+      instructions: |
+        Review legal domain logic.
+
+        Enforce:
+        - Clear mapping: law → article → content
+        - No duplication of law data
+        - Proper referencing of article numbers
+
+    - path: "src/prisma/**/*.ts"
+      instructions: |
+        Ensure Prisma is used correctly.
+
+        Enforce:
+        - Singleton PrismaService
+        - Proper connection lifecycle
+        - No multiple Prisma instances
+
+    - path: "prisma/schema.prisma"
+      instructions: |
+        Review database schema.
+
+        Enforce:
+        - Proper use of pgvector
+        - Avoid JSON embeddings
+        - Use correct data types
+        - Ensure indexing for performance
+
+# ⚖️ Legal citation enforcement
+  labeling_instructions:
+    - label: "missing-legal-citation"
+      instructions: "Apply when AI responses do not reference article numbers or legal sources"
+
+    - label: "rag-issue"
+      instructions: "Apply when retrieval or embedding logic is incorrect"
+
+    - label: "architecture-issue"
+      instructions: "Apply when clean architecture principles are violated"
+
+    - label: "performance-issue"
+      instructions: "Apply when inefficient DB or vector operations are detected"
+
+# 🚫 Ignore noise
+  path_filters:
+    - "!node_modules/**"
+    - "!dist/**"
+    - "!coverage/**"
+    - "!*.log"
+    - "!package-lock.json"
+
+# 🧪 Tools
+  tools:
+    eslint:
+      enabled: true
+    actionlint:
+      enabled: true
+
+# 🧠 Learning
+learning:
+  enabled: true
+
+# ✨ Finishing touches
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+
+# 🏷 Auto labels
+  auto_apply_labels: true
