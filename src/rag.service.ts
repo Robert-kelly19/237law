@@ -42,18 +42,22 @@ export class RagService implements OnModuleInit {
 
       const validChunks = rawChunks
         .map((chunk, index) => ({ chunk, index }))
-        .filter(({ chunk }) =>
-          this.embeddingService.getChunkValidationReason(chunk) === null,
+        .filter(
+          ({ chunk }) =>
+            this.embeddingService.getChunkValidationReason(chunk) === null,
         );
 
       if (!validChunks.length) continue;
 
-      const texts = validChunks.map(c => c.chunk);
+      const texts = validChunks.map((c) => c.chunk);
       const embeddings = await this.embeddingService.generateEmbeddings(texts);
 
       for (let i = 0; i < texts.length; i++) {
-        const { lawName, articleNumber } =
-          this.pdfService.extractMetadata(texts[i], source, validChunks[i].index);
+        const { lawName, articleNumber } = this.pdfService.extractMetadata(
+          texts[i],
+          source,
+          validChunks[i].index,
+        );
 
         const vector = this.vectorToLiteral(embeddings[i]);
 
@@ -97,11 +101,12 @@ export class RagService implements OnModuleInit {
     if (!sections.length) {
       return `Sorry, I couldn't find a clear legal answer for your question.
 
-NB: This response is for informational purposes only.`;
+NB: This response is provided for informational purposes only and does not constitute legal advice.
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
     }
 
     const context = sections
-      .map(s => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`)
+      .map((s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`)
       .join('\n\n');
 
     const prompt = `
@@ -109,27 +114,50 @@ You are a helpful legal assistant for Cameroon.
 
 Explain the law in a very simple and friendly way so anyone can understand.
 
-Rules:
-- Use simple everyday English
-- Keep sentences short
-- Start with a direct answer (Yes/No if possible)
-- Do not invent laws
-- Use the provided context only
-- Always cite like: "According to Section X of [Law Name]"
-- Add "Penalty:" only if it exists
+CRITICAL RULES:
+- Do NOT start with "Yes" or "No" unless the question is explicitly yes/no
+- If user asks "what do I need" or "how to", list requirements directly
+- ALWAYS reference at least one real law
+- If multiple laws are relevant, you MUST reference at least two
+- NEVER invent laws or articles
+- NEVER use "chunk-*" or internal IDs
+- ONLY use real legal references from the provided context
 
-Format:
+MULTI-LAW RULE:
+- If both Penal Code and Criminal Procedure Code (or any other laws) are relevant:
+  → Cite both clearly
+  → Explain what each one says
+  → Highlight the difference in simple terms
 
-<Simple answer>
+STYLE:
+- Simple English
+- Friendly tone
+- Short paragraphs
+- Use bullet points if helpful
 
-According to Section/Article X of [Law Name],
-<simple explanation>
+FORMAT:
+
+Direct answer (simple explanation)
+
+According to:
+- Article/Section X of [Law Name]
+- Article/Section Y of [Law Name] (if applicable)
+
+Simple explanation of what each law says
+
+Difference (if applicable):
+Explain the difference in plain language
 
 Penalty:
-<if applicable>
+(only if mentioned in context)
 
-End with:
-NB: This response is for informational purposes only.
+NB:
+This response is provided for informational purposes only and does not constitute legal advice.
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..
+
+IMPORTANT:
+- If only one law applies, use only one reference
+- If no law is found, say: "No clear legal provision found in available laws"
 
 Context:
 ${context}
@@ -139,7 +167,6 @@ ${query}
 
 Answer:
 `;
-
     const response = await this.openai.chat.completions.create({
       model: 'gpt-4.1-mini',
       messages: [{ role: 'user', content: prompt }],
@@ -156,15 +183,17 @@ Answer:
     if (!answer) {
       return `Sorry, I couldn't find a clear legal answer for your question.
 
-NB: This response is for informational purposes only.`;
+NB: This response is provided for informational purposes only and does not constitute legal advice.
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;
     }
 
-    if (answer.includes('NB: This response is for informational purposes only.')) {
+    if (
+      answer.includes('NB: This response is provided for informational purposes only and does not constitute legal advice.For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;') 
+
+    ) {
       return answer;
     }
 
-    return `${answer}
-
-NB: This response is for informational purposes only.`;
+    return `${answer}`;
   }
 }
