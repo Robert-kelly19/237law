@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from './prisma.service';
 import { EmbeddingService } from './embedding.service';
 import { PdfService } from './pdf.service';
@@ -59,11 +60,12 @@ export class RagService implements OnModuleInit {
           validChunks[i].index,
         );
 
+        const contentHash = this.computeContentHash(texts[i]);
         const vector = this.vectorToLiteral(embeddings[i]);
 
         await this.prisma.$executeRaw`
-          INSERT INTO law_sections ("lawName","articleNumber",content,source,embedding)
-          VALUES (${lawName},${articleNumber},${texts[i]},${source},${vector}::vector(1536))
+          INSERT INTO law_sections ("lawName","articleNumber",content,source,contentHash,embedding)
+          VALUES (${lawName},${articleNumber},${texts[i]},${source},${contentHash},${vector}::vector(1536))
         `;
       }
     }
@@ -78,6 +80,10 @@ export class RagService implements OnModuleInit {
 
   private vectorToLiteral(embedding: number[]): string {
     return `[${embedding.join(',')}]`;
+  }
+
+  private computeContentHash(content: string): string {
+    return createHash('sha256').update(content, 'utf8').digest('hex');
   }
 
   async searchRelevantSections(query: string): Promise<LawSectionResult[]> {
