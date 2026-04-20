@@ -27,6 +27,7 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@types/pdf-parse": "^1.1.5",
+    "ky": "^1.14.3",
     "openai": "^6.34.0",
     "pdf-parse": "^2.4.5",
     "reflect-metadata": "^0.2.2",
