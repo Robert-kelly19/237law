@@ -3,30 +3,40 @@ import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import express from 'express';
-import { createHash, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, {
-    bodyParser: false, // Disable default body parser to capture raw body
+    bodyParser: false,
   });
 
-  // Get config service for app secret
   const configService = app.get(ConfigService);
+  const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
   const appSecret = configService.get<string>('WHATSAPP_APP_SECRET');
 
-  // Custom JSON parser that captures raw body buffer for signature verification
+  if (nodeEnv === 'production' && !appSecret) {
+    logger.error('WHATSAPP_APP_SECRET is required in production environment');
+    process.exit(1);
+  }
+
+  if (!appSecret && nodeEnv !== 'production') {
+    logger.warn(
+      'WhatsApp app secret not configured. Webhook signature verification will be skipped in non-production mode.',
+    );
+  }
+
   app.use(
     express.json({
+      limit: '1mb',
       verify: (req: any, _res, buf) => {
         req.rawBody = buf.toString('utf8');
       },
     }),
   );
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-  // WhatsApp signature verification middleware
   app.use((req, res, next) => {
-    // Only verify POST webhook calls
     if (req.method !== 'POST' || !req.path.includes('whatsapp/webhook')) {
       return next();
     }
@@ -34,16 +44,15 @@ async function bootstrap() {
     const signature = req.headers['x-hub-signature-256'] as string;
     const rawBody = req.rawBody;
 
+    if (!appSecret) {
+      return res
+        .status(500)
+        .json({ error: 'Server misconfiguration: app secret not set' });
+    }
+
     if (!signature) {
       logger.warn('Missing X-Hub-Signature-256 header');
       return res.status(403).json({ error: 'Missing signature header' });
-    }
-
-    if (!appSecret) {
-      logger.warn(
-        'WhatsApp app secret not configured, skipping signature verification',
-      );
-      return next();
     }
 
     if (!rawBody) {
@@ -74,10 +83,9 @@ async function bootstrap() {
 bootstrap();
 
 function generateSignature(secret: string, body: string): string {
-  const hash = createHash('sha256')
-    .update(secret + body, 'utf8')
-    .digest('hex');
-  return `sha256=${hash}`;
+  const hmac = createHmac('sha256', secret);
+  hmac.update(body, 'utf8');
+  return `sha256=${hmac.digest('hex')}`;
 }
 
 function verifySignature(

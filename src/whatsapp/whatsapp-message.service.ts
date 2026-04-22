@@ -1,12 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
+import { createHash } from 'crypto';
 
 export enum ProcessingStatus {
-  PENDING = 'pending',
-  PROCESSING = 'processing',
-  SUCCESS = 'success',
-  FAILED = 'failed',
-  RETRYING = 'retrying',
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+  RETRYING = 'RETRYING',
+}
+
+function maskPhoneNumber(phoneNumber: string): string {
+  if (!phoneNumber || phoneNumber.length < 4) return '****';
+  return phoneNumber.slice(0, -4).replace(/./g, '*') + phoneNumber.slice(-4);
+}
+
+function hashIdentifier(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
 interface WhatsAppMessageRecord {
@@ -31,7 +41,7 @@ export class WhatsAppMessageService {
   async isDuplicate(whatsappMessageId: string): Promise<boolean> {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM "WhatsAppMessage" 
+        SELECT id FROM whatsapp_messages 
         WHERE "whatsappMessageId" = ${whatsappMessageId}
         LIMIT 1
       `;
@@ -50,13 +60,13 @@ export class WhatsAppMessageService {
   ): Promise<void> {
     try {
       await this.prisma.$executeRaw`
-        INSERT INTO "WhatsAppMessage" ("whatsappMessageId", "phoneNumber", "messageType", "contentPreview", "processingStatus")
-        VALUES (${whatsappMessageId}, ${phoneNumber}, ${messageType}, ${contentPreview || null}, 'pending')
+        INSERT INTO whatsapp_messages ("whatsappMessageId", "phoneNumber", "messageType", "contentPreview", "processingStatus")
+        VALUES (${whatsappMessageId}, ${phoneNumber}, ${messageType}, ${contentPreview || null}, 'PENDING')
         ON CONFLICT ("whatsappMessageId") DO NOTHING
       `;
       this.logger.debug('Created message record', {
         whatsappMessageId,
-        phoneNumber,
+        phoneNumber: maskPhoneNumber(phoneNumber),
         messageType,
       });
     } catch (error: any) {
@@ -68,10 +78,10 @@ export class WhatsAppMessageService {
   async markAsProcessing(whatsappMessageId: string): Promise<boolean> {
     try {
       const result = await this.prisma.$executeRaw`
-        UPDATE "WhatsAppMessage" 
-        SET "processingStatus" = 'processing', "processedAt" = NOW()
+        UPDATE whatsapp_messages 
+        SET "processingStatus" = 'PROCESSING', "processedAt" = NOW()
         WHERE "whatsappMessageId" = ${whatsappMessageId} 
-        AND "processingStatus" = 'pending'
+        AND "processingStatus" = 'PENDING'
       `;
       return result > 0;
     } catch (error: any) {
@@ -83,8 +93,8 @@ export class WhatsAppMessageService {
   async markAsSuccess(whatsappMessageId: string): Promise<boolean> {
     try {
       const result = await this.prisma.$executeRaw`
-        UPDATE "WhatsAppMessage" 
-        SET "processingStatus" = 'success', "processedAt" = NOW()
+        UPDATE whatsapp_messages 
+        SET "processingStatus" = 'SUCCESS', "processedAt" = NOW()
         WHERE "whatsappMessageId" = ${whatsappMessageId}
       `;
       return result > 0;
@@ -100,8 +110,8 @@ export class WhatsAppMessageService {
   ): Promise<boolean> {
     try {
       const result = await this.prisma.$executeRaw`
-        UPDATE "WhatsAppMessage" 
-        SET "processingStatus" = 'failed', "errorMessage" = ${errorMessage}, "processedAt" = NOW()
+        UPDATE whatsapp_messages 
+        SET "processingStatus" = 'FAILED', "errorMessage" = ${errorMessage}, "processedAt" = NOW()
         WHERE "whatsappMessageId" = ${whatsappMessageId}
       `;
       return result > 0;
@@ -114,8 +124,8 @@ export class WhatsAppMessageService {
   async incrementRetryCount(whatsappMessageId: string): Promise<number> {
     try {
       await this.prisma.$executeRaw`
-        UPDATE "WhatsAppMessage" 
-        SET "retryCount" = "retryCount" + 1, "processingStatus" = 'retrying'
+        UPDATE whatsapp_messages 
+        SET "retryCount" = "retryCount" + 1, "processingStatus" = 'RETRYING'
         WHERE "whatsappMessageId" = ${whatsappMessageId}
       `;
       const record = await this.getByWhatsAppId(whatsappMessageId);
@@ -130,7 +140,7 @@ export class WhatsAppMessageService {
     whatsappMessageId: string,
   ): Promise<WhatsAppMessageRecord | null> {
     const rows = await this.prisma.$queryRaw<Array<WhatsAppMessageRecord>>`
-      SELECT * FROM "WhatsAppMessage" 
+      SELECT * FROM whatsapp_messages 
       WHERE "whatsappMessageId" = ${whatsappMessageId}
       LIMIT 1
     `;

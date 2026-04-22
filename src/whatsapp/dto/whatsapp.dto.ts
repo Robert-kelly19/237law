@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsEnum,
   MaxLength,
+  IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -65,12 +66,12 @@ export class WhatsAppDocumentPayload {
 
 export class WhatsAppLocationPayload {
   @IsNotEmpty()
-  @IsString()
-  latitude!: string;
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  latitude!: number;
 
   @IsNotEmpty()
-  @IsString()
-  longitude!: string;
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  longitude!: number;
 }
 
 export class WhatsAppMessageDto {

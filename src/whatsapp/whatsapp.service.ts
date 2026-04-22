@@ -1,8 +1,18 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import ky from 'ky';
+import { createHash } from 'crypto';
 import { RagService } from 'src/rag.service';
 import { WhatsAppMessageService } from './whatsapp-message.service';
+
+function maskPhone(phoneNumber: string): string {
+  if (!phoneNumber || phoneNumber.length < 4) return '****';
+  return phoneNumber.slice(0, -4).replace(/./g, '*') + phoneNumber.slice(-4);
+}
+
+function hashIdentifier(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
 
 interface WhatsAppErrorResponse {
   error?: {
@@ -69,6 +79,10 @@ export class WhatsappService implements OnModuleInit {
       throw new Error('WhatsApp not configured: missing access token');
     }
 
+    if (!this.whatsappConfig.phoneNumberId) {
+      throw new Error('WhatsApp not configured: missing phoneNumberId');
+    }
+
     const url = `https://graph.facebook.com/${this.whatsappConfig.version}/${this.whatsappConfig.phoneNumberId}/messages`;
     const data = {
       messaging_product: 'whatsapp',
@@ -79,7 +93,7 @@ export class WhatsappService implements OnModuleInit {
 
     try {
       this.logger.debug('Sending WhatsApp message', {
-        phoneNumber,
+        phoneNumber: maskPhone(phoneNumber),
         messageLength: message.length,
         attempt: retryCount + 1,
       });
@@ -91,6 +105,7 @@ export class WhatsappService implements OnModuleInit {
           'Content-Type': 'application/json',
         },
         retry: { limit: 0 },
+        throwHttpErrors: false,
       });
 
       if (!response.ok) {
@@ -105,7 +120,7 @@ export class WhatsappService implements OnModuleInit {
 
         this.logger.warn('WhatsApp API error', {
           status: response.status,
-          phoneNumber,
+          phoneNumber: maskPhone(phoneNumber),
           error: errorMsg,
         });
 
@@ -121,10 +136,12 @@ export class WhatsappService implements OnModuleInit {
         throw new Error(`WhatsApp API error: ${errorMsg}`);
       }
 
-      this.logger.debug('WhatsApp message sent successfully', { phoneNumber });
+      this.logger.debug('WhatsApp message sent successfully', {
+        phoneNumber: maskPhone(phoneNumber),
+      });
     } catch (error: any) {
       this.logger.error(
-        `Failed to send WhatsApp message to ${phoneNumber}: ${error.message}`,
+        `Failed to send WhatsApp message to ${hashIdentifier(phoneNumber)}: ${error.message}`,
         error.stack,
       );
 
@@ -147,35 +164,29 @@ export class WhatsappService implements OnModuleInit {
     const contentPreview = this.messageService.getContentPreview(textContent);
 
     this.logger.debug('Processing incoming message', {
-      whatsappMessageId,
-      phoneNumber,
+      whatsappMessageId: hashIdentifier(whatsappMessageId),
+      phoneNumber: maskPhone(phoneNumber),
       messageType,
       hasText: !!textContent,
     });
 
-    // Check for duplicate
-    const isDuplicate =
-      await this.messageService.isDuplicate(whatsappMessageId);
-    if (isDuplicate) {
+    const claimed =
+      await this.messageService.markAsProcessing(whatsappMessageId);
+    if (!claimed) {
       this.logger.warn(
-        `Duplicate message detected, skipping: ${whatsappMessageId}`,
+        `Duplicate or already processing: ${hashIdentifier(whatsappMessageId)}`,
       );
       return;
     }
 
-    // Create record
-    await this.messageService.createMessageRecord(
-      whatsappMessageId,
-      phoneNumber,
-      messageType,
-      contentPreview,
-    );
-
-    // Mark as processing
-    await this.messageService.markAsProcessing(whatsappMessageId);
+    if (messageType !== 'text') {
+      const reply = this.getUnsupportedMessageReply(messageType);
+      await this.sendMessage(phoneNumber, reply);
+      await this.messageService.markAsSuccess(whatsappMessageId);
+      return;
+    }
 
     try {
-      // Only process text messages for now; other types can be extended
       if (!textContent) {
         const reply = this.getUnsupportedMessageReply(messageType);
         await this.sendMessage(phoneNumber, reply);
@@ -183,21 +194,18 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
-      // Get RAG response
       const response = await this.ragService.askQuestion(textContent);
 
-      // Send response
       await this.sendMessage(phoneNumber, response);
 
-      // Mark as success
       await this.messageService.markAsSuccess(whatsappMessageId);
 
       this.logger.debug('Message processed successfully', {
-        whatsappMessageId,
+        whatsappMessageId: hashIdentifier(whatsappMessageId),
       });
     } catch (error: any) {
       this.logger.error(
-        `Failed to process message ${whatsappMessageId}: ${error.message}`,
+        `Failed to process message ${hashIdentifier(whatsappMessageId)}: ${error.message}`,
         error.stack,
       );
 
@@ -206,10 +214,6 @@ export class WhatsappService implements OnModuleInit {
 
       if (retryCount < 3 && this.isRetryableProcessingError(error)) {
         this.logger.log(`Message queued for retry (attempt ${retryCount})`);
-        await this.messageService.markAsFailed(
-          whatsappMessageId,
-          error.message,
-        );
       } else {
         await this.messageService.markAsFailed(
           whatsappMessageId,

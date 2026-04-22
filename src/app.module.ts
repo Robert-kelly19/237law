@@ -5,17 +5,18 @@ import { AppService } from './app.service';
 import { RagModule } from './rag.module';
 import { RagController } from './rag.controller';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
-import { PrismaService } from './prisma.service';
+import { PrismaModule } from './prisma.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    PrismaModule,
     RagModule,
     WhatsAppModule,
   ],
   controllers: [AppController, RagController],
-  providers: [AppService, PrismaService],
+  providers: [AppService],
 })
 export class AppModule {}

@@ -6,16 +6,22 @@ import {
   Query,
   Header,
   Logger,
-  ValidationPipe,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsAppWebhookDto, WhatsAppMessageDto } from './dto/whatsapp.dto';
+import { WhatsAppMessageService } from './whatsapp-message.service';
 
 @Controller('whatsapp')
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);
 
-  constructor(private whatsappService: WhatsappService) {}
+  constructor(
+    private whatsappService: WhatsappService,
+    private configService: ConfigService,
+    private messageService: WhatsAppMessageService,
+  ) {}
 
   @Get('webhook')
   verifyWebhook(
@@ -23,34 +29,74 @@ export class WhatsappController {
     @Query('hub.verify_token') token: string,
     @Query('hub.challenge') challenge: string,
   ): string {
-    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-      this.logger.log('Webhook verified successfully');
-      return challenge;
-    } else {
-      this.logger.error('Webhook verification failed: invalid token or mode');
+    const expectedToken = this.configService.get<string>(
+      'WHATSAPP_VERIFY_TOKEN',
+    );
+
+    if (!expectedToken) {
+      this.logger.error('WHATSAPP_VERIFY_TOKEN is not configured');
       return 'Verification failed';
     }
+
+    if (mode === 'subscribe' && token && expectedToken) {
+      const tokenBuf = Buffer.from(token);
+      const expectedBuf = Buffer.from(expectedToken);
+
+      if (
+        tokenBuf.length !== expectedBuf.length ||
+        !timingSafeEqual(tokenBuf, expectedBuf)
+      ) {
+        this.logger.error('Webhook verification failed: invalid token or mode');
+        return 'Verification failed';
+      }
+
+      this.logger.log('Webhook verified successfully');
+      return challenge;
+    }
+
+    this.logger.error('Webhook verification failed: invalid token or mode');
+    return 'Verification failed';
   }
 
   @Post('webhook')
   @Header('Content-Type', 'application/json')
   async receiveMessage(
-    @Body(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-        transformOptions: { enableImplicitConversion: true },
-      }),
-    )
-    body: WhatsAppWebhookDto,
+    @Body() body: WhatsAppWebhookDto,
   ): Promise<{ status: string }> {
-    this.logger.debug('Received webhook payload', { object: body.object });
+    this.logger.debug(
+      `Received webhook payload: ${JSON.stringify(body.object)}`,
+    );
 
-    // Process asynchronously to acknowledge webhook quickly
-    this.processWebhookAsync(body);
+    await this.persistWebhook(body);
 
     return { status: 'ok' };
+  }
+
+  private async persistWebhook(body: WhatsAppWebhookDto): Promise<void> {
+    if (body.object !== 'whatsapp_business_account' || !body.entry) {
+      return;
+    }
+
+    for (const entry of body.entry) {
+      if (!entry.changes || !Array.isArray(entry.changes)) continue;
+
+      for (const change of entry.changes) {
+        const value = change.value;
+        if (!value?.messages) continue;
+
+        for (const message of value.messages) {
+          const whatsappMessageId = message.id;
+          const phoneNumber = message.from;
+          const messageType = message.type || 'unknown';
+
+          await this.messageService.createMessageRecord(
+            whatsappMessageId,
+            phoneNumber,
+            messageType,
+          );
+        }
+      }
+    }
   }
 
   private processWebhookAsync(body: WhatsAppWebhookDto): void {
@@ -58,10 +104,15 @@ export class WhatsappController {
       try {
         await this.processWebhookPayload(body);
       } catch (error) {
-        this.logger.error(
-          `Failed to process webhook: ${error.message}`,
-          error.stack,
-        );
+        const err = error as unknown;
+        if (err instanceof Error) {
+          this.logger.error(
+            `Failed to process webhook: ${err.message}`,
+            err.stack,
+          );
+        } else {
+          this.logger.error(`Failed to process webhook: ${String(err)}`);
+        }
       }
     });
   }
@@ -95,15 +146,26 @@ export class WhatsappController {
       return;
     }
 
-    // Process ALL messages in the batch (not just the first one)
     for (const message of value.messages) {
       try {
+        const claimed = await this.messageService.markAsProcessing(message.id);
+        if (!claimed) {
+          this.logger.warn(`Duplicate or already processing: ${message.id}`);
+          continue;
+        }
+
         await this.whatsappService.handleIncomingMessage(message);
       } catch (error) {
-        this.logger.error(
-          `Failed to process message ${message.id} from ${message.from}: ${error.message}`,
-        );
-        // Continue processing remaining messages
+        const err = error as unknown;
+        if (err instanceof Error) {
+          this.logger.error(
+            `Failed to process message ${message.id} from ${message.from}: ${err.message}`,
+          );
+        } else {
+          this.logger.error(
+            `Failed to process message ${message.id} from ${message.from}: ${String(err)}`,
+          );
+        }
       }
     }
   }

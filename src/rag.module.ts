@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { RagService } from './rag.service';
-import { PrismaService } from './prisma.service';
+import { PrismaModule } from './prisma.module';
 import { EmbeddingService } from './embedding.service';
 import { PdfService } from './pdf.service';
 
 @Module({
-  providers: [RagService, PrismaService, EmbeddingService, PdfService],
+  imports: [PrismaModule],
+  providers: [RagService, EmbeddingService, PdfService],
   exports: [RagService],
 })
 export class RagModule {}

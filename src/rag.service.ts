@@ -5,6 +5,9 @@ import { EmbeddingService } from './embedding.service';
 import { PdfService } from './pdf.service';
 import OpenAI from 'openai';
 
+const LEGAL_DISCLAIMER = `NB: This response is provided for informational purposes only and does not constitute legal advice.
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
+
 type LawSectionResult = {
   id: string;
   lawName: string;
@@ -64,16 +67,23 @@ export class RagService implements OnModuleInit {
         const vector = this.vectorToLiteral(embeddings[i]);
 
         await this.prisma.$executeRaw`
-          INSERT INTO law_sections ("lawName","articleNumber",content,source,contentHash,embedding)
+          INSERT INTO "law_sections" ("lawName","articleNumber","content","source","contentHash","embedding")
           VALUES (${lawName},${articleNumber},${texts[i]},${source},${contentHash},${vector}::vector(1536))
         `;
       }
+
+      await this.prisma.sourceIngestion.create({
+        data: {
+          source,
+          ingestedAt: new Date(),
+        },
+      });
     }
   }
 
   private async isSourceIngested(source: string): Promise<boolean> {
     const rows = await this.prisma.$queryRaw`
-      SELECT 1 FROM law_sections WHERE source = ${source} LIMIT 1
+      SELECT 1 FROM source_ingestion WHERE source = ${source} LIMIT 1
     `;
     return Array.isArray(rows) && rows.length > 0;
   }
@@ -93,7 +103,7 @@ export class RagService implements OnModuleInit {
     const results = await this.prisma.$queryRaw`
       SELECT id,"lawName","articleNumber",content,source,
       embedding <=> ${vector}::vector(1536) AS distance
-      FROM law_sections
+      FROM "law_sections"
       ORDER BY embedding <=> ${vector}::vector(1536)
       LIMIT 5
     `;
@@ -105,10 +115,7 @@ export class RagService implements OnModuleInit {
     const sections = await this.searchRelevantSections(query);
 
     if (!sections.length) {
-      return `Sorry, I couldn't find a clear legal answer for your question.
-
-NB: This response is provided for informational purposes only and does not constitute legal advice.
-For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
+      return LEGAL_DISCLAIMER;
     }
 
     const context = sections
@@ -170,8 +177,7 @@ Penalty:
 (only if mentioned in context)
 
 NB:
-This response is provided for informational purposes only and does not constitute legal advice.
-For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..
+${LEGAL_DISCLAIMER}
 
 IMPORTANT:
 - If only one law applies, use only one reference
@@ -199,19 +205,13 @@ Answer:
 
   private formatAnswer(answer: string): string {
     if (!answer) {
-      return `Sorry, I couldn't find a clear legal answer for your question.
-
-NB: This response is provided for informational purposes only and does not constitute legal advice.
-For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;
+      return LEGAL_DISCLAIMER;
     }
 
-    if (
-      answer.includes('NB: This response is provided for informational purposes only and does not constitute legal advice.For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;') 
-
-    ) {
+    if (answer.includes(LEGAL_DISCLAIMER)) {
       return answer;
     }
 
-    return `${answer}`;
+    return `${answer}\n\n${LEGAL_DISCLAIMER}`;
   }
 }

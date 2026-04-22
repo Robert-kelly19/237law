@@ -20,6 +20,7 @@ model LawSection {
   embedding Unsupported("vector(1536)")
 
   @@map("law_sections")
+  @@unique([source, contentHash])
 }
 
 model SourceIngestion {
@@ -31,16 +32,26 @@ model SourceIngestion {
 }
 
 model WhatsAppMessage {
-  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  whatsappMessageId   String   @unique
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  whatsappMessageId   String           @unique
   phoneNumber         String
   messageType         String
   contentPreview      String?
-  processingStatus    String   @default("pending")
+  processingStatus    ProcessingStatus @default(PENDING)
   errorMessage        String?
-  retryCount          Int      @default(0)
-  createdAt           DateTime @default(now())
+  retryCount          Int              @default(0)
+  createdAt           DateTime         @default(now())
   processedAt         DateTime?
 
   @@map("whatsapp_messages")
+  @@index([processingStatus])
+  @@index([phoneNumber])
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  RETRYING
 }
