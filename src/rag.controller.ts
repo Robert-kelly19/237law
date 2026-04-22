@@ -11,7 +11,9 @@ export class RagController {
    */
   @Get('search')
   async search(@Query() searchDto: SearchQueryDto) {
-    const results = await this.ragService.searchRelevantSections(searchDto.query);
+    const results = await this.ragService.searchRelevantSections(
+      searchDto.query,
+    );
     return results;
   }
 

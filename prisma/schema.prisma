@@ -15,8 +15,32 @@ model LawSection {
   articleNumber String
   content       String
   source        String
+  contentHash   String
 
   embedding Unsupported("vector(1536)")
 
   @@map("law_sections")
+}
+
+model SourceIngestion {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source     String   @unique
+  ingestedAt DateTime @default(now())
+
+  @@map("source_ingestion")
+}
+
+model WhatsAppMessage {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  whatsappMessageId   String   @unique
+  phoneNumber         String
+  messageType         String
+  contentPreview      String?
+  processingStatus    String   @default("pending")
+  errorMessage        String?
+  retryCount          Int      @default(0)
+  createdAt           DateTime @default(now())
+  processedAt         DateTime?
+
+  @@map("whatsapp_messages")
 }
