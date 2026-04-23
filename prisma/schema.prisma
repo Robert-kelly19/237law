@@ -1,13 +1,22 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model LawSection {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lawName       String
+  articleNumber String
+  content       String
+  source        String
+
+  embedding Unsupported("vector(1536)")
+
+  @@map("law_sections")
 }
