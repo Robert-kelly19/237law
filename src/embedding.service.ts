@@ -31,7 +31,7 @@ export class EmbeddingService {
 
     const wordCount = trimmed.split(/\s+/).length;
     if (wordCount < 5) {
-      return `Chunk has too few words (${wordCount})`; 
+      return `Chunk has too few words (${wordCount})`;
     }
 
     return null;
@@ -48,7 +48,9 @@ export class EmbeddingService {
     const normalizedTexts = texts.filter((text, index) => {
       const reason = this.getChunkValidationReason(text);
       if (reason !== null) {
-        console.warn(`[EmbeddingService] Skipping invalid batch input at index ${index}: ${reason}`);
+        console.warn(
+          `[EmbeddingService] Skipping invalid batch input at index ${index}: ${reason}`,
+        );
         return false;
       }
       return true;
@@ -65,7 +67,7 @@ export class EmbeddingService {
           model: 'text-embedding-3-small',
           input: batch,
         });
-        embeddings.push(...response.data.map(d => d.embedding));
+        embeddings.push(...response.data.map((d) => d.embedding));
       } catch (error) {
         console.error('Error generating embeddings:', error);
         throw error;

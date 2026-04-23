@@ -17,7 +17,7 @@ export class PdfService {
       return [];
     }
 
-    const files = fs.readdirSync(pdfsDir).filter(f => f.endsWith('.pdf'));
+    const files = fs.readdirSync(pdfsDir).filter((f) => f.endsWith('.pdf'));
 
     const results: { source: string; text: string }[] = [];
 
@@ -94,7 +94,7 @@ export class PdfService {
   private splitIntoSentences(text: string): string[] {
     return text
       .split(/(?<=[.!?])\s+/)
-      .map(s => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean);
   }
 
