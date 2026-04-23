@@ -67,7 +67,9 @@ export class WhatsappController {
       `Received webhook payload: ${JSON.stringify(body.object)}`,
     );
 
+    // Persist webhook first, then trigger async processing
     await this.persistWebhook(body);
+    this.processWebhookAsync(body);
 
     return { status: 'ok' };
   }
