@@ -64,7 +64,7 @@ export class RagService implements OnModuleInit {
         const vector = this.vectorToLiteral(embeddings[i]);
 
         await this.prisma.$executeRaw`
-          INSERT INTO law_sections ("lawName","articleNumber",content,source,contentHash,embedding)
+          INSERT INTO law_sections ("lawName","articleNumber",content,source,content_hash,embedding)
           VALUES (${lawName},${articleNumber},${texts[i]},${source},${contentHash},${vector}::vector(1536))
         `;
       }
