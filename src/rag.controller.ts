@@ -1,5 +1,6 @@
 import { Controller, Body, Get, Post, Query } from '@nestjs/common';
 import { RagService } from './rag.service';
+import { AskQueryDto, SearchQueryDto } from './rag-query.dto';
 
 @Controller('rag')
 export class RagController {
@@ -9,8 +10,8 @@ export class RagController {
    * Endpoint to search for relevant sections.
    */
   @Get('search')
-  async search(@Query('query') query: string) {
-    const results = await this.ragService.searchRelevantSections(query);
+  async search(@Query() searchDto: SearchQueryDto) {
+    const results = await this.ragService.searchRelevantSections(searchDto.query);
     return results;
   }
 
@@ -18,8 +19,8 @@ export class RagController {
    * Endpoint to ask a question using RAG.
    */
   @Post('ask')
-  async ask(@Body() body: { query: string }) {
-    const answer = await this.ragService.askQuestion(body.query);
+  async ask(@Body() askDto: AskQueryDto) {
+    const answer = await this.ragService.askQuestion(askDto.query);
     return { answer };
   }
 }
