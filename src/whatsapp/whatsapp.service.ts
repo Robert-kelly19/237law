@@ -38,14 +38,15 @@ export class WhatsappService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.logger.error(`Failed to send message: ${errorText}`);
-        return;
+        this.logger.error(`Failed to send message: status ${response.status}`);
+        throw new Error(`Failed to send WhatsApp message: ${response.status}`);
       }
 
       const data = await response.json();
-      this.logger.log(`Message sent: ${JSON.stringify(data)}`);
+      this.logger.log(`Message sent successfully`);
     } catch (error) {
-      this.logger.error('Error sending WhatsApp message', error);
+      this.logger.error('Error sending WhatsApp message', error instanceof Error ? error.message : error);
+      throw error;
     }
   }
 }
