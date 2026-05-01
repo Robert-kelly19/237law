@@ -44,38 +44,56 @@ export class WhatsappController {
 async receiveMessage(@Body() body: any) {
   this.logger.log(`Incoming webhook`);
 
-  const change = body?.entry?.[0]?.changes?.[0]?.value;
-  const message = change?.messages?.[0];
+  const entries = body?.entry || [];
+  let processedCount = 0;
+  let ignoredCount = 0;
 
-  if (!message) {
-    return { status: 'IGNORED' };
-  }
+  for (const entry of entries) {
+    const changes = entry?.changes || [];
+    for (const change of changes) {
+      const messages = change?.value?.messages || [];
+      for (const message of messages) {
+        const from = message.from;
+        const text = message.text?.body;
 
-  const from = message.from;
-  const text = message.text?.body;
+        if (!text) {
+          this.logger.warn('Non-text message received');
+          ignoredCount++;
+          continue;
+        }
 
-  if (!text) {
-    this.logger.warn('Non-text message received');
-    return { status: 'IGNORED' };
-  }
+        // ⚡ respond immediately to Meta for each message
+        setImmediate(async () => {
+          try {
+            // Redact phone number: show only last 4 digits
+            const redactedPhone = from.slice(-4).padStart(from.length, '*');
+            // Redact message: show only length
+            const messageMetadata = `length=${text.length}`;
+            this.logger.log(`User ${redactedPhone}: ${messageMetadata}`);
 
-  // ⚡ respond immediately to Meta
-  setImmediate(async () => {
-    try {
-      this.logger.log(`User ${from}: ${text}`);
+            const response = await this.ragService.askQuestion(text);
 
-      const response = await this.ragService.askQuestion(text);
+            await this.whatsappService.send(from, response);
+          } catch (err) {
+            // Sanitize error: avoid logging raw message or phone data
+            const sanitizedError = err instanceof Error ? err.message : 'Unknown error';
+            this.logger.error(`Failed to process message: ${sanitizedError}`);
 
-      await this.whatsappService.send(from, response);
-    } catch (err) {
-      this.logger.error(err);
+            await this.whatsappService.send(
+              from,
+              'Something went wrong. Try again later.',
+            );
+          }
+        });
 
-      await this.whatsappService.send(
-        from,
-        'Something went wrong Try again later.',
-      );
+        processedCount++;
+      }
     }
-  });
+  }
 
-  return { status: 'EVENT_RECEIVED' };
+  if (processedCount === 0 && ignoredCount === 0) {
+    return { status: 'IGNORED' };
+  }
+
+  return { status: 'EVENT_RECEIVED', processedCount, ignoredCount };
 }}
