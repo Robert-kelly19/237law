@@ -13,9 +13,9 @@ export class WhatsappService {
     const apiVersion =
       this.configService.get<string>('META_API_VERSION') || 'v19.0';
 
-    if (!token || !phoneNumberId) {
-      throw new Error('Missing WhatsApp configuration');
-    }
+    // if (!token || !phoneNumberId) {
+    //   throw new Error('Missing WhatsApp configuration');
+    // }
 
     const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
 
@@ -38,15 +38,14 @@ export class WhatsappService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.logger.error(`Failed to send message: status ${response.status}`);
-        throw new Error(`Failed to send WhatsApp message: ${response.status}`);
+        this.logger.error(`Failed to send message: ${errorText}`);
+        return;
       }
 
       const data = await response.json();
-      this.logger.log(`Message sent successfully`);
+      this.logger.log(`Message sent: ${JSON.stringify(data)}`);
     } catch (error) {
-      this.logger.error('Error sending WhatsApp message', error instanceof Error ? error.message : error);
-      throw error;
+      this.logger.error('Error sending WhatsApp message', error);
     }
   }
 }
