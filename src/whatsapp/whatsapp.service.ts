@@ -9,7 +9,9 @@ export class WhatsappService {
 
   async send(to: string, message: string): Promise<void> {
     const token = this.configService.get<string>('WHATSAPP_TOKEN');
-    const phoneNumberId = this.configService.get<string>('WHATSAPP_PHONE_NUMBER_ID');
+    const phoneNumberId = this.configService.get<string>(
+      'WHATSAPP_PHONE_NUMBER_ID',
+    );
     const apiVersion =
       this.configService.get<string>('META_API_VERSION') || 'v19.0';
 

@@ -213,8 +213,9 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
     }
 
     if (
-      answer.includes('NB: This response is provided for informational purposes only and does not constitute legal advice.For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;') 
-
+      answer.includes(
+        'NB: This response is provided for informational purposes only and does not constitute legal advice.For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;',
+      )
     ) {
       return answer;
     }

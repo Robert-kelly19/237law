@@ -17,6 +17,13 @@ import { ConfigModule } from '@nestjs/config';
     }),
   ],
   controllers: [AppController, RagController, WhatsappController],
-  providers: [AppService, PrismaService, PdfService, EmbeddingService, RagService, WhatsappService],
+  providers: [
+    AppService,
+    PrismaService,
+    PdfService,
+    EmbeddingService,
+    RagService,
+    WhatsappService,
+  ],
 })
 export class AppModule {}

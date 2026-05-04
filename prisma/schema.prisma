@@ -15,8 +15,8 @@ model LawSection {
   articleNumber String
   content       String
   source        String
-
-  embedding Unsupported("vector(1536)")
+  content_hash  String
+  embedding     Unsupported("vector(1536)")
 
   @@map("law_sections")
 }
