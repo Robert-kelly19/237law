@@ -8,16 +8,14 @@ export class WhatsappService {
   constructor(private configService: ConfigService) {}
 
   async send(to: string, message: string): Promise<void> {
-    const token = this.configService.get<string>('WHATSAPP_TOKEN');
-    const phoneNumberId = this.configService.get<string>(
-      'WHATSAPP_PHONE_NUMBER_ID',
-    );
+    const token = this.configService.get<string>('WHATSAPP_ACCESS_TOKEN');
+    const phoneNumberId = this.configService.get<string>('WHATSAPP_PHONE_NUMBER_ID');
     const apiVersion =
-      this.configService.get<string>('META_API_VERSION') || 'v19.0';
+      this.configService.get<string>('WHATSAPP_API_VERSION') || 'v19.0';
 
-    // if (!token || !phoneNumberId) {
-    //   throw new Error('Missing WhatsApp configuration');
-    // }
+    if (!token || !phoneNumberId) {
+      throw new Error('Missing WhatsApp configuration');
+    }
 
     const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
 

@@ -59,6 +59,7 @@ export class WhatsappController {
 
           try {
             const response = await this.ragService.askQuestion(text);
+            this.logger.log(`Generated response: ${response}`);
             await this.whatsappService.send(from, response);
           } catch (err) {
             await this.whatsappService.send(
