@@ -4,6 +4,7 @@ import { PrismaService } from './prisma.service';
 import { EmbeddingService } from './embedding.service';
 import { PdfService } from './pdf.service';
 import OpenAI from 'openai';
+import { Logger } from '@nestjs/common';
 
 type LawSectionResult = {
   id: string;
@@ -17,6 +18,7 @@ type LawSectionResult = {
 @Injectable()
 export class RagService implements OnModuleInit {
   private openai: OpenAI;
+  private readonly logger = new Logger(RagService.name);
 
   constructor(
     private prisma: PrismaService,
@@ -219,7 +221,7 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
     ) {
       return answer;
     }
-
+    this.logger.log(`Formatted answer: ${answer}`);
     return `${answer}`;
   }
 }
