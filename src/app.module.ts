@@ -9,6 +9,8 @@ import { RagController } from './rag.controller';
 import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { ConfigModule } from '@nestjs/config';
+import { createRagAgent } from './agent/rag.agent';
+import { Agent } from '@voltagent/core';
 
 @Module({
   imports: [
@@ -24,6 +26,13 @@ import { ConfigModule } from '@nestjs/config';
     EmbeddingService,
     RagService,
     WhatsappService,
+    {
+      provide: 'RAG_AGENT',
+      useFactory: (ragService: RagService): Agent => {
+        return createRagAgent(ragService);
+      },
+      inject: [RagService],
+    },
   ],
 })
 export class AppModule {}

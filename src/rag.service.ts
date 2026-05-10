@@ -34,12 +34,17 @@ export class RagService implements OnModuleInit {
     await this.ingestPdfs();
   }
 
-  async ingestPdfs(): Promise<void> {
+  async ingestPdfs(): Promise<{ ingested: string[]; skipped: string[] }> {
     const pdfData = await this.pdfService.extractTextsFromPdfs();
+    const ingested: string[] = [];
+    const skipped: string[] = [];
 
     for (const { source, text } of pdfData) {
       const exists = await this.isSourceIngested(source);
-      if (exists) continue;
+      if (exists) {
+        skipped.push(source);
+        continue;
+      }
 
       const rawChunks = this.pdfService.chunkText(text);
 
@@ -70,7 +75,11 @@ export class RagService implements OnModuleInit {
           VALUES (${lawName},${articleNumber},${texts[i]},${source},${contentHash},${vector}::vector(1536))
         `;
       }
+
+      ingested.push(source);
     }
+
+    return { ingested, skipped };
   }
 
   private async isSourceIngested(source: string): Promise<boolean> {
@@ -211,12 +220,12 @@ Answer:
       return `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
-For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
     }
 
     if (
       answer.includes(
-        'NB: This response is provided for informational purposes only and does not constitute legal advice.For proper legal assistance, please consult a qualified lawyer via the contact details in our bio..`;',
+        'NB: This response is provided for informational purposes only and does not constitute legal advice.For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`',
       )
     ) {
       return answer;
