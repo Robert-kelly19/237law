@@ -9,12 +9,8 @@ import { RagController } from './rag.controller';
 import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { ConfigModule } from '@nestjs/config';
-import { MemoryService } from './memory/memory.service';
-import { ConversationService } from './memory/conversation.service';
-import { LawSearchTool } from './agents/tools/law-search.tool';
-import { CitationTool } from './agents/tools/citation.tool';
-import { ContextTool } from './agents/tools/context.tool';
-import { LegalAgentService } from './agents/legal.agent';
+import { createRagAgent } from './agent/rag.agent';
+import { Agent } from '@voltagent/core';
 
 @Module({
   imports: [
@@ -30,12 +26,13 @@ import { LegalAgentService } from './agents/legal.agent';
     EmbeddingService,
     RagService,
     WhatsappService,
-    MemoryService,
-    ConversationService,
-    LawSearchTool,
-    CitationTool,
-    ContextTool,
-    LegalAgentService,
+    {
+      provide: 'RAG_AGENT',
+      useFactory: (ragService: RagService): Agent => {
+        return createRagAgent(ragService);
+      },
+      inject: [RagService],
+    },
   ],
 })
 export class AppModule {}
