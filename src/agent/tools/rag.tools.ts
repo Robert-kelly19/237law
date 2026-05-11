@@ -27,7 +27,7 @@ export function createSearchTool(ragService: RagService) {
     description:
       'Searches the law database for sections relevant to a query using vector similarity. Returns the top matching law articles.',
     parameters: z.object({
-      query: z.string().describe('The legal question or topic to search for.'),
+      query: z.string().trim().min(1, 'Query must not be empty').describe('The legal question or topic to search for.'),
     }),
     outputSchema: z.array(
       z.object({
@@ -53,6 +53,8 @@ export function createAskQuestionTool(ragService: RagService) {
     parameters: z.object({
       query: z
         .string()
+        .trim()
+        .min(1, 'Query must not be empty')
         .describe('The legal question from the user in plain language.'),
     }),
     outputSchema: z.string().describe('A structured legal answer.'),
