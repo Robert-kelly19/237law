@@ -5,29 +5,17 @@ import { RagService } from '../../rag.service';
 
 // ─── tool factories ───────────────────────────────────────────────────────────
 
-export function createIngestTool(ragService: RagService) {
-  return createTool({
-    name: 'ingest_pdfs',
-    description:
-      'Scans all PDF files, chunks them, generates embeddings, and stores them in the database. Run this once on startup or when new PDFs are added.',
-    parameters: z.object({}),
-    outputSchema: z.object({
-      ingested: z.array(z.string()),
-      skipped: z.array(z.string()),
-    }),
-    execute: async () => {
-      return ragService.ingestPdfs();
-    },
-  });
-}
-
 export function createSearchTool(ragService: RagService) {
   return createTool({
     name: 'search_sections',
     description:
       'Searches the law database for sections relevant to a query using vector similarity. Returns the top matching law articles.',
     parameters: z.object({
-      query: z.string().trim().min(1, 'Query must not be empty').describe('The legal question or topic to search for.'),
+      query: z
+        .string()
+        .trim()
+        .min(1, 'Query must not be empty')
+        .describe('The legal question or topic to search for.'),
     }),
     outputSchema: z.array(
       z.object({
