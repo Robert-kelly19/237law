@@ -1,18 +1,18 @@
-// agents/rag.agent.ts
 import { Agent, Memory } from '@voltagent/core';
 import { openai } from '@ai-sdk/openai';
 import { LibSQLMemoryAdapter } from '@voltagent/libsql';
 import { RagService } from '../rag.service';
-import {
-  createSearchTool,
-  createAskQuestionTool,
-} from './tools/rag.tools';
+import { createAskQuestionTool, createSearchTool } from './tools/rag.tools';
 
 export function createRagAgent(ragService: RagService) {
+  const memoryDbUrl = process.env.MEMORY_DATABASE_URL;
+  if (!memoryDbUrl) {
+    throw new Error(
+      'MEMORY_DATABASE_URL environment variable is required but not set',
+    );
+  }
   const memory = new Memory({
-    storage: new LibSQLMemoryAdapter({
-      url: process.env.MEMORY_DATABASE_URL || 'file:memory.db',
-    }),
+    storage: new LibSQLMemoryAdapter({ url: memoryDbUrl }),
   });
 
   return new Agent({
@@ -26,9 +26,6 @@ export function createRagAgent(ragService: RagService) {
     `,
     model: openai('gpt-4o-mini'),
     memory,
-    tools: [
-      createSearchTool(ragService),
-      createAskQuestionTool(ragService),
-    ],
+    tools: [createAskQuestionTool(ragService), createSearchTool(ragService)],
   });
 }
