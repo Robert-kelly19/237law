@@ -20,3 +20,51 @@ model LawSection {
 
   @@map("law_sections")
 }
+
+model ConversationTurn {
+  id              String    @id @default(cuid())
+  userId          String    // WhatsApp ID or user identifier
+  sessionId       String    // Group related conversations
+  turnNumber      Int       // Sequence in conversation
+  userQuery       String
+  agentThought    String?   // Agent's reasoning (JSON)
+  toolsUsed       String[]  // Which tools were invoked
+  lawSectionsRef  String[]  // IDs of law_sections used
+  response        String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("conversation_turns")
+}
+
+model SemanticMemory {
+  id              String    @id @default(cuid())
+  userId          String
+  memoryType      String    // "topic" | "learned_article" | "user_preference" | "reasoning_trace"
+  key             String    // e.g., "labor_law", "article_74_reference"
+  content         String    // JSON with metadata
+  importance      Int       @default(1) // 1-5 priority score
+  embedding       Unsupported("vector(1536)")? // For semantic search
+  createdAt       DateTime  @default(now())
+  lastAccessed    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([memoryType])
+  @@map("semantic_memory")
+}
+
+model AgentReasoning {
+  id              String    @id @default(cuid())
+  conversationId  String
+  step            Int       // Sequential step in reasoning
+  action          String    // "search" | "cross_reference" | "analyze" | "synthesize"
+  input           String    // What was asked/needed
+  output          String    // Result of action
+  confidence      Float     @default(1.0) // 0-1 confidence score
+  createdAt       DateTime  @default(now())
+
+  @@index([conversationId])
+  @@map("agent_reasoning")
+}

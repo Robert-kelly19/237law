@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength, IsOptional } from 'class-validator';
 
 export class SearchQueryDto {
   @IsNotEmpty()
@@ -12,4 +12,12 @@ export class AskQueryDto {
   @IsString()
   @MaxLength(1000)
   query!: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 }

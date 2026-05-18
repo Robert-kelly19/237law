@@ -9,6 +9,12 @@ import { RagController } from './rag.controller';
 import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { ConfigModule } from '@nestjs/config';
+import { MemoryService } from './memory/memory.service';
+import { ConversationService } from './memory/conversation.service';
+import { LawSearchTool } from './agents/tools/law-search.tool';
+import { CitationTool } from './agents/tools/citation.tool';
+import { ContextTool } from './agents/tools/context.tool';
+import { LegalAgentService } from './agents/legal.agent';
 
 @Module({
   imports: [
@@ -24,6 +30,12 @@ import { ConfigModule } from '@nestjs/config';
     EmbeddingService,
     RagService,
     WhatsappService,
+    MemoryService,
+    ConversationService,
+    LawSearchTool,
+    CitationTool,
+    ContextTool,
+    LegalAgentService,
   ],
 })
 export class AppModule {}
