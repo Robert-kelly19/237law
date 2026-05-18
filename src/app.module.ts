@@ -9,7 +9,6 @@ import { RagController } from './rag.controller';
 import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { ConfigModule } from '@nestjs/config';
-import { Agent } from '@voltagent/core';
 
 @Module({
   imports: [
