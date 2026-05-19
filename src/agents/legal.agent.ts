@@ -176,7 +176,7 @@ export class LegalAgentService {
         relatedArticles: synthesis.relatedArticles,
         conversationTurnId: conversationTurn.id,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(`Query processing failed: ${error.message}`, error.stack);
       throw error;
     }
@@ -302,7 +302,7 @@ export class LegalAgentService {
       }
 
       results.overallConfidence = 0.95;
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(`Tool execution failed: ${error.message}`);
       results.overallConfidence = 0.6;
     }

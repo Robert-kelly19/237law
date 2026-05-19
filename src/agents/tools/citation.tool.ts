@@ -38,7 +38,7 @@ export class CitationTool {
         data: citation,
         reasoning: `Successfully formatted citation for ${lawSection.lawName} Article ${lawSection.articleNumber}`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to format citation: ${error.message}`,
         error.stack,
@@ -76,7 +76,7 @@ export class CitationTool {
         },
         reasoning: `Generated ${citations.length} citations with formatted bibliography`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to generate citation list: ${error.message}`,
         error.stack,
@@ -139,7 +139,7 @@ export class CitationTool {
           ? `Citation is valid: ${lawName}, Article ${this.cleanArticleNumber(articleNumber)}`
           : `Citation format may be unusual: ${lawName}, Article ${articleNumber}`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to validate citation: ${error.message}`,
         error.stack,
@@ -230,7 +230,7 @@ export class CitationTool {
         data: citations,
         reasoning: `Extracted ${citations.length} citations from text`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to extract citations: ${error.message}`,
         error.stack,

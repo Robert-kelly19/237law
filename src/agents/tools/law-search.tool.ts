@@ -57,7 +57,7 @@ export class LawSearchTool {
         data: results,
         reasoning: `Found ${results.length} law sections matching keyword "${query}"`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Keyword search failed: ${error.message}`,
         error.stack,
@@ -101,7 +101,7 @@ export class LawSearchTool {
         data: results,
         reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Topic search failed: ${error.message}`,
         error.stack,
@@ -138,7 +138,7 @@ export class LawSearchTool {
         data: article,
         reasoning: `Successfully retrieved article ${article.lawName} Article ${article.articleNumber}`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to fetch article: ${error.message}`,
         error.stack,
@@ -200,7 +200,7 @@ export class LawSearchTool {
         data: relatedArticles,
         reasoning: `Found ${relatedArticles.length} related articles to ${article.lawName} Article ${article.articleNumber}`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to get cross-references: ${error.message}`,
         error.stack,
@@ -249,7 +249,7 @@ export class LawSearchTool {
         data: results,
         reasoning: `Found ${results.length} sections of ${lawName}${articleNumber ? ` Article ${articleNumber}` : ''}`,
       };
-    } catch (error) {
+    } catch (error:any) {
       this.logger.error(
         `Failed to search by law/article: ${error.message}`,
         error.stack,
