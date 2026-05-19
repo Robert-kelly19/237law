@@ -14,7 +14,11 @@ interface StoreConversationParams {
 
 interface StoreSemanticMemoryParams {
   userId: string;
-  memoryType: 'topic' | 'learned_article' | 'user_preference' | 'reasoning_trace';
+  memoryType:
+    | 'topic'
+    | 'learned_article'
+    | 'user_preference'
+    | 'reasoning_trace';
   key: string;
   content: Record<string, any>;
   importance?: number;
@@ -37,9 +41,7 @@ export class MemoryService {
   /**
    * Store a conversation turn with agent reasoning and tool usage
    */
-  async storeConversation(
-    params: StoreConversationParams,
-  ): Promise<any> {
+  async storeConversation(params: StoreConversationParams): Promise<any> {
     try {
       const conversationTurn = await this.prisma.conversationTurn.create({
         data: {
@@ -60,7 +62,7 @@ export class MemoryService {
         `Stored conversation turn: ${conversationTurn.id} for user: ${params.userId}`,
       );
       return conversationTurn;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to store conversation: ${error.message}`,
         error.stack,
@@ -72,9 +74,7 @@ export class MemoryService {
   /**
    * Store semantic memory for a user
    */
-  async storeSemanticMemory(
-    params: StoreSemanticMemoryParams,
-  ): Promise<any> {
+  async storeSemanticMemory(params: StoreSemanticMemoryParams): Promise<any> {
     try {
       const semanticMemory = await this.prisma.semanticMemory.create({
         data: {
@@ -90,7 +90,7 @@ export class MemoryService {
         `Stored semantic memory: ${semanticMemory.id} for user: ${params.userId}`,
       );
       return semanticMemory;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to store semantic memory: ${error.message}`,
         error.stack,
@@ -126,7 +126,7 @@ export class MemoryService {
         ...turn,
         agentThought: turn.agentThought ? JSON.parse(turn.agentThought) : null,
       }));
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get conversation history: ${error.message}`,
         error.stack,
@@ -161,7 +161,7 @@ export class MemoryService {
         ...memory,
         content: JSON.parse(memory.content),
       }));
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get semantic context: ${error.message}`,
         error.stack,
@@ -190,7 +190,7 @@ export class MemoryService {
         `Updated memory importance: ${memoryId} to ${clampedImportance}`,
       );
       return updated;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to update memory importance: ${error.message}`,
         error.stack,
@@ -223,7 +223,7 @@ export class MemoryService {
       });
 
       return { sessions, total };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get user conversations: ${error.message}`,
         error.stack,
@@ -252,7 +252,7 @@ export class MemoryService {
         `Deleted ${result.count} conversation turns older than ${daysOld} days`,
       );
       return result.count;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to delete old conversations: ${error.message}`,
         error.stack,

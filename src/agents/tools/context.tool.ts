@@ -63,7 +63,7 @@ export class ContextTool {
         },
         reasoning: `Retrieved ${conversations.sessions.length} conversation sessions for user ${userId}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get conversation context: ${error.message}`,
         error.stack,
@@ -180,7 +180,7 @@ export class ContextTool {
         },
         reasoning: `Identified primary topic as "${primaryTopic}" with ${(confidence * 100).toFixed(0)}% confidence`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to identify topic: ${error.message}`,
         error.stack,
@@ -228,7 +228,7 @@ export class ContextTool {
         data: reasoningStep,
         reasoning: `Stored ${params.action} reasoning step with ${(params.confidence || 1.0) * 100}% confidence`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to store reasoning step: ${error.message}`,
         error.stack,
@@ -258,7 +258,7 @@ export class ContextTool {
         data: steps,
         reasoning: `Retrieved ${steps.length} reasoning steps for conversation`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get reasoning trace: ${error.message}`,
         error.stack,
@@ -276,7 +276,11 @@ export class ContextTool {
    */
   async storeSemanticContext(params: {
     userId: string;
-    memoryType: 'topic' | 'learned_article' | 'user_preference' | 'reasoning_trace';
+    memoryType:
+      | 'topic'
+      | 'learned_article'
+      | 'user_preference'
+      | 'reasoning_trace';
     key: string;
     content: Record<string, any>;
     importance?: number;
@@ -299,7 +303,7 @@ export class ContextTool {
         data: memory,
         reasoning: `Stored semantic memory: ${params.key} with importance ${params.importance || 1}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to store semantic context: ${error.message}`,
         error.stack,
@@ -335,7 +339,7 @@ export class ContextTool {
         data: context,
         reasoning: `Retrieved ${context.length} semantic memories of type ${memoryType}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get semantic context: ${error.message}`,
         error.stack,
@@ -360,11 +364,10 @@ export class ContextTool {
         `Building context summary for user ${userId}, session ${sessionId}`,
       );
 
-      const conversationHistory = await this.memoryService.getConversationHistory(
-        userId,
-        sessionId,
-        { lastN: 5 },
-      );
+      const conversationHistory =
+        await this.memoryService.getConversationHistory(userId, sessionId, {
+          lastN: 5,
+        });
 
       const recentTopics = await this.memoryService.getSemanticContext(
         userId,
@@ -378,8 +381,8 @@ export class ContextTool {
         conversationLength: conversationHistory.length,
         recentQueries: conversationHistory.map((t) => t.userQuery),
         topicsOfInterest: recentTopics.map((t) => t.key),
-        lastInteraction: conversationHistory[conversationHistory.length - 1]
-          ?.createdAt,
+        lastInteraction:
+          conversationHistory[conversationHistory.length - 1]?.createdAt,
       };
 
       return {
@@ -387,7 +390,7 @@ export class ContextTool {
         data: summary,
         reasoning: `Built context summary with ${conversationHistory.length} turns and ${recentTopics.length} topics`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to build context summary: ${error.message}`,
         error.stack,

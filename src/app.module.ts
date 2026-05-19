@@ -34,7 +34,7 @@ import { ContextTool } from './agents/tools/context.tool';
     CitationTool,
     ContextTool,
     MemoryService,
-    ConversationService
+    ConversationService,
   ],
 })
 export class AppModule {}

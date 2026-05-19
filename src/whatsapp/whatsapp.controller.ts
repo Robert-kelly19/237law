@@ -12,6 +12,46 @@ import {
 import type { Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
 import { RagService } from '../rag.service';
+import { LegalAgentService } from '../agents/legal.agent';
+
+interface WhatsappWebhookBody {
+  object?: string;
+  entry: WebhookEntry[];
+}
+
+interface WebhookEntry {
+  id?: string;
+  changes?: WebhookChange[];
+}
+
+interface WebhookChange {
+  value?: WebhookValue;
+}
+
+interface WebhookValue {
+  messaging_product?: string;
+  metadata?: WebhookMetadata;
+  contacts?: any[];
+  messages?: WebhookMessage[];
+}
+
+interface WebhookMetadata {
+  display_phone_number?: string;
+  phone_number_id?: string;
+}
+
+interface WebhookMessage {
+  from?: string;
+  id?: string;
+  timestamp?: string;
+  text?: WebhookText;
+  type?: string;
+  [key: string]: any; // For other message types like images, videos, etc.
+}
+
+interface WebhookText {
+  body?: string;
+}
 
 @Controller('whatsapp')
 export class WhatsappController {
@@ -20,6 +60,7 @@ export class WhatsappController {
   constructor(
     private whatsappService: WhatsappService,
     private ragService: RagService,
+    private legalAgent: LegalAgentService,
   ) {}
 
   @Get('webhook')
@@ -42,26 +83,40 @@ export class WhatsappController {
 
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
-  async receiveMessage(@Body() body: any) {
+  async receiveMessage(@Body() body: WhatsappWebhookBody) {
     this.logger.log(`Incoming webhook`);
 
-    for (const entry of body?.entry || []) {
-      for (const change of entry?.changes || []) {
-        const value = change?.value;
+    if (!body?.entry) {
+      return { status: 'EVENT_RECEIVED' };
+    }
 
-        if (!value?.messages) continue;
+    for (const entry of body.entry) {
+      if (!entry?.changes) continue;
 
-        for (const message of value.messages) {
+      for (const change of entry.changes) {
+        if (!change?.value?.messages) continue;
+
+        for (const message of change.value.messages) {
           const from = message.from;
           const text = message.text?.body;
 
-          if (!text) continue;
+          if (!from || !text) continue;
 
           try {
-            const response = await this.ragService.askQuestion(text);
-            this.logger.log(`Generated response: ${response}`);
-            await this.whatsappService.send(from, response);
-          } catch (err) {
+            // Use the agent with memory like askWithAgent endpoint
+            const response = await this.legalAgent.processQuery({
+              userId: from, // Use WhatsApp number as user ID
+              sessionId: from, // Use WhatsApp number as session ID (could also be undefined)
+              query: text,
+            });
+
+            this.logger.log(`Generated response: ${response.answer}`);
+            await this.whatsappService.send(from, response.answer);
+          } catch (err: any) {
+            this.logger.error(
+              `Agent processing error: ${err instanceof Error ? err.message : String(err)}`,
+              err instanceof Error ? err.stack : undefined,
+            );
             await this.whatsappService.send(
               from,
               'Something went wrong. Try again later.',

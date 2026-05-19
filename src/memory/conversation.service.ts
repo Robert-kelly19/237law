@@ -41,7 +41,7 @@ export class ConversationService {
       }
 
       return lastTurn.sessionId;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get or create session: ${error.message}`,
         error.stack,
@@ -79,7 +79,7 @@ export class ConversationService {
         currentTopic,
         previousTopics: [...new Set(previousTopics)],
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get conversation context: ${error.message}`,
         error.stack,
@@ -99,7 +99,7 @@ export class ConversationService {
       });
 
       return (lastTurn?.turnNumber || 0) + 1;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get next turn number: ${error.message}`,
         error.stack,
@@ -158,7 +158,7 @@ export class ConversationService {
         response: turn.response,
         tools: turn.toolsUsed,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to generate turn summary: ${error.message}`,
         error.stack,
@@ -207,7 +207,7 @@ export class ConversationService {
         createdAt: turns[0].createdAt,
         updatedAt: turns[turns.length - 1].updatedAt,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get session stats: ${error.message}`,
         error.stack,

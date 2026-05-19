@@ -29,10 +29,7 @@ export class LawSearchTool {
   /**
    * Search law sections by keyword
    */
-  async searchByKeyword(
-    query: string,
-    limit: number = 5,
-  ): Promise<ToolResult> {
+  async searchByKeyword(query: string, limit: number = 5): Promise<ToolResult> {
     try {
       this.logger.debug(`Searching by keyword: ${query} (limit: ${limit})`);
 
@@ -57,11 +54,8 @@ export class LawSearchTool {
         data: results,
         reasoning: `Found ${results.length} law sections matching keyword "${query}"`,
       };
-    } catch (error:any) {
-      this.logger.error(
-        `Keyword search failed: ${error.message}`,
-        error.stack,
-      );
+    } catch (error: any) {
+      this.logger.error(`Keyword search failed: ${error.message}`, error.stack);
       return {
         success: false,
         data: [],
@@ -78,9 +72,8 @@ export class LawSearchTool {
       this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);
 
       // Generate embedding for the topic
-      const topicEmbedding = await this.embeddingService.generateQueryEmbedding(
-        topic,
-      );
+      const topicEmbedding =
+        await this.embeddingService.generateQueryEmbedding(topic);
 
       // Vector similarity search using PostgreSQL
       const results = await this.prisma.$queryRaw<any[]>`
@@ -101,11 +94,8 @@ export class LawSearchTool {
         data: results,
         reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
       };
-    } catch (error:any) {
-      this.logger.error(
-        `Topic search failed: ${error.message}`,
-        error.stack,
-      );
+    } catch (error: any) {
+      this.logger.error(`Topic search failed: ${error.message}`, error.stack);
       return {
         success: false,
         data: [],
@@ -138,7 +128,7 @@ export class LawSearchTool {
         data: article,
         reasoning: `Successfully retrieved article ${article.lawName} Article ${article.articleNumber}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to fetch article: ${error.message}`,
         error.stack,
@@ -159,9 +149,7 @@ export class LawSearchTool {
     limit: number = 5,
   ): Promise<ToolResult> {
     try {
-      this.logger.debug(
-        `Getting cross-references for article: ${articleId}`,
-      );
+      this.logger.debug(`Getting cross-references for article: ${articleId}`);
 
       // Get the original article
       const article = await this.prisma.lawSection.findUnique({
@@ -200,7 +188,7 @@ export class LawSearchTool {
         data: relatedArticles,
         reasoning: `Found ${relatedArticles.length} related articles to ${article.lawName} Article ${article.articleNumber}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to get cross-references: ${error.message}`,
         error.stack,
@@ -249,7 +237,7 @@ export class LawSearchTool {
         data: results,
         reasoning: `Found ${results.length} sections of ${lawName}${articleNumber ? ` Article ${articleNumber}` : ''}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to search by law/article: ${error.message}`,
         error.stack,

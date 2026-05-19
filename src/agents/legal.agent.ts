@@ -53,7 +53,9 @@ export class LegalAgentService {
     this.reasoningSteps = [];
 
     try {
-      this.logger.debug(`Processing query for user ${query.userId}: ${query.query}`);
+      this.logger.debug(
+        `Processing query for user ${query.userId}: ${query.query}`,
+      );
 
       // Step 1: Classify and identify topic
       const classification = await this.classifyQuery(query.query);
@@ -127,9 +129,8 @@ export class LegalAgentService {
       });
 
       // Step 6: Store conversation turn
-      const turnNumber = await this.conversationService.getNextTurnNumber(
-        sessionId,
-      );
+      const turnNumber =
+        await this.conversationService.getNextTurnNumber(sessionId);
 
       const conversationTurn = await this.memoryService.storeConversation({
         userId: query.userId,
@@ -176,8 +177,11 @@ export class LegalAgentService {
         relatedArticles: synthesis.relatedArticles,
         conversationTurnId: conversationTurn.id,
       };
-    } catch (error:any) {
-      this.logger.error(`Query processing failed: ${error.message}`, error.stack);
+    } catch (error: any) {
+      this.logger.error(
+        `Query processing failed: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -269,10 +273,7 @@ export class LegalAgentService {
     try {
       // Execute keyword search
       if (toolPlan.tools.includes('search_by_keyword')) {
-        const searchResult = await this.lawSearchTool.searchByKeyword(
-          query,
-          5,
-        );
+        const searchResult = await this.lawSearchTool.searchByKeyword(query, 5);
         if (searchResult.success) {
           results.searchResults = searchResult.data;
         }
@@ -302,7 +303,7 @@ export class LegalAgentService {
       }
 
       results.overallConfidence = 0.95;
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(`Tool execution failed: ${error.message}`);
       results.overallConfidence = 0.6;
     }
@@ -352,7 +353,12 @@ export class LegalAgentService {
         `Based on Cameroonian law, specifically ${this.citationTool.generateInlineCitation(primaryArticle)}:\n\n` +
         `${primaryArticle.content}\n\n` +
         (uniqueArticles.length > 1
-          ? `This provision is related to:\n${uniqueArticles.slice(1).map((a: any) => `- ${this.citationTool.generateInlineCitation(a)}`).join('\n')}`
+          ? `This provision is related to:\n${uniqueArticles
+              .slice(1)
+              .map(
+                (a: any) => `- ${this.citationTool.generateInlineCitation(a)}`,
+              )
+              .join('\n')}`
           : '');
     }
 
@@ -367,17 +373,18 @@ export class LegalAgentService {
         lawName: a.lawName,
         articleNumber: a.articleNumber,
       })),
-      toolsUsed: ['search_by_keyword', 'search_by_topic', 'get_cross_references'].filter(
-        (t) => {
-          if (t === 'search_by_keyword')
-            return toolResults.searchResults.length > 0;
-          if (t === 'search_by_topic')
-            return toolResults.topicResults.length > 0;
-          if (t === 'get_cross_references')
-            return toolResults.crossReferences.length > 0;
-          return false;
-        },
-      ),
+      toolsUsed: [
+        'search_by_keyword',
+        'search_by_topic',
+        'get_cross_references',
+      ].filter((t) => {
+        if (t === 'search_by_keyword')
+          return toolResults.searchResults.length > 0;
+        if (t === 'search_by_topic') return toolResults.topicResults.length > 0;
+        if (t === 'get_cross_references')
+          return toolResults.crossReferences.length > 0;
+        return false;
+      }),
       relatedArticles,
     };
   }

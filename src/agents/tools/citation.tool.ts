@@ -38,7 +38,7 @@ export class CitationTool {
         data: citation,
         reasoning: `Successfully formatted citation for ${lawSection.lawName} Article ${lawSection.articleNumber}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to format citation: ${error.message}`,
         error.stack,
@@ -56,7 +56,9 @@ export class CitationTool {
    */
   generateCitationList(lawSections: any[]): ToolResult {
     try {
-      this.logger.debug(`Generating citation list for ${lawSections.length} sections`);
+      this.logger.debug(
+        `Generating citation list for ${lawSections.length} sections`,
+      );
 
       const citations: Citation[] = lawSections.map((section) => ({
         lawName: section.lawName,
@@ -76,7 +78,7 @@ export class CitationTool {
         },
         reasoning: `Generated ${citations.length} citations with formatted bibliography`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to generate citation list: ${error.message}`,
         error.stack,
@@ -139,7 +141,7 @@ export class CitationTool {
           ? `Citation is valid: ${lawName}, Article ${this.cleanArticleNumber(articleNumber)}`
           : `Citation format may be unusual: ${lawName}, Article ${articleNumber}`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to validate citation: ${error.message}`,
         error.stack,
@@ -170,9 +172,7 @@ export class CitationTool {
    * Clean article number format
    */
   private cleanArticleNumber(articleNumber: string): string {
-    return articleNumber
-      .replace(/^Article\s+/i, '')
-      .trim();
+    return articleNumber.replace(/^Article\s+/i, '').trim();
   }
 
   /**
@@ -193,10 +193,7 @@ export class CitationTool {
     // Remove duplicates and sort
     const uniqueCitations = Array.from(
       new Map(
-        citations.map((c) => [
-          `${c.lawName}-${c.articleNumber}`,
-          c,
-        ]),
+        citations.map((c) => [`${c.lawName}-${c.articleNumber}`, c]),
       ).values(),
     );
 
@@ -230,7 +227,7 @@ export class CitationTool {
         data: citations,
         reasoning: `Extracted ${citations.length} citations from text`,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to extract citations: ${error.message}`,
         error.stack,

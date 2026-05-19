@@ -1,4 +1,12 @@
-import { Controller, Body, Get, Post, Query, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Body,
+  Get,
+  Post,
+  Query,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { RagService } from './rag.service';
 import { AskQueryDto, SearchQueryDto } from './rag-query.dto';
 import { LegalAgentService } from './agents/legal.agent';
@@ -60,8 +68,11 @@ export class RagController {
         success: true,
         data: response,
       };
-    } catch (error:any) {
-      this.logger.error(`Agent processing error: ${error.message}`, error.stack);
+    } catch (error: any) {
+      this.logger.error(
+        `Agent processing error: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
