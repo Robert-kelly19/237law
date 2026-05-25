@@ -48,7 +48,6 @@ export class ContextTool {
         };
       }
 
-      // Get all sessions for user
       const conversations = await this.memoryService.getUserConversations(
         userId,
         5,
@@ -68,130 +67,11 @@ export class ContextTool {
         `Failed to get conversation context: ${error.message}`,
         error.stack,
       );
+
       return {
         success: false,
         data: null,
         reasoning: `Failed to get conversation context: ${error.message}`,
-      };
-    }
-  }
-
-  /**
-   * Identify legal topic from query
-   */
-  getTopic(query: string): ToolResult {
-    try {
-      this.logger.debug(`Identifying topic from query: ${query}`);
-
-      const legalTopics = {
-        labor: [
-          'labor',
-          'employment',
-          'worker',
-          'salary',
-          'wage',
-          'contract',
-          'dismissal',
-          'overtime',
-        ],
-        penal: [
-          'crime',
-          'theft',
-          'assault',
-          'murder',
-          'penalty',
-          'prison',
-          'jail',
-          'criminal',
-        ],
-        civil: [
-          'contract',
-          'property',
-          'inheritance',
-          'marriage',
-          'divorce',
-          'lawsuit',
-          'damages',
-        ],
-        family: [
-          'marriage',
-          'divorce',
-          'child',
-          'custody',
-          'adoption',
-          'inheritance',
-          'family',
-        ],
-        commercial: [
-          'business',
-          'company',
-          'trade',
-          'commercial',
-          'contract',
-          'sale',
-          'purchase',
-        ],
-        procedural: [
-          'court',
-          'procedure',
-          'evidence',
-          'trial',
-          'lawsuit',
-          'jurisdiction',
-          'legal',
-        ],
-        constitutional: [
-          'constitution',
-          'government',
-          'rights',
-          'fundamental',
-          'state',
-          'citizen',
-        ],
-      };
-
-      const queryLower = query.toLowerCase();
-      const scores: Record<string, number> = {};
-
-      // Calculate topic scores
-      for (const [topic, keywords] of Object.entries(legalTopics)) {
-        scores[topic] = keywords.filter((keyword) =>
-          queryLower.includes(keyword),
-        ).length;
-      }
-
-      // Find the topic with highest score
-      const sortedTopics = Object.entries(scores)
-        .filter(([, score]) => score > 0)
-        .sort(([, scoreA], [, scoreB]) => scoreB - scoreA);
-
-      const identifiedTopics = sortedTopics.map(([topic]) => topic);
-      const primaryTopic = identifiedTopics[0] || 'general';
-      const confidence =
-        sortedTopics.length > 0 ? Math.min(sortedTopics[0][1] / 3, 1) : 0.3;
-
-      return {
-        success: true,
-        data: {
-          primaryTopic,
-          relatedTopics: identifiedTopics.slice(1),
-          confidence,
-          query,
-        },
-        reasoning: `Identified primary topic as "${primaryTopic}" with ${(confidence * 100).toFixed(0)}% confidence`,
-      };
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to identify topic: ${error.message}`,
-        error.stack,
-      );
-      return {
-        success: false,
-        data: {
-          primaryTopic: 'general',
-          confidence: 0,
-        },
-        reasoning: `Failed to identify topic: ${error.message}`,
       };
     }
   }
@@ -226,13 +106,14 @@ export class ContextTool {
       return {
         success: true,
         data: reasoningStep,
-        reasoning: `Stored ${params.action} reasoning step with ${(params.confidence || 1.0) * 100}% confidence`,
+        reasoning: `Stored ${params.action} reasoning step`,
       };
     } catch (error: any) {
       this.logger.error(
         `Failed to store reasoning step: ${error.message}`,
         error.stack,
       );
+
       return {
         success: false,
         data: null,
@@ -242,7 +123,7 @@ export class ContextTool {
   }
 
   /**
-   * Get all reasoning steps for a conversation
+   * Get reasoning trace for a conversation
    */
   async getReasoningTrace(conversationId: string): Promise<ToolResult> {
     try {
@@ -256,13 +137,14 @@ export class ContextTool {
       return {
         success: true,
         data: steps,
-        reasoning: `Retrieved ${steps.length} reasoning steps for conversation`,
+        reasoning: `Retrieved ${steps.length} reasoning steps`,
       };
     } catch (error: any) {
       this.logger.error(
         `Failed to get reasoning trace: ${error.message}`,
         error.stack,
       );
+
       return {
         success: false,
         data: [],
@@ -272,7 +154,7 @@ export class ContextTool {
   }
 
   /**
-   * Store semantic context for future reference
+   * Store semantic context
    */
   async storeSemanticContext(params: {
     userId: string;
@@ -281,6 +163,7 @@ export class ContextTool {
       | 'learned_article'
       | 'user_preference'
       | 'reasoning_trace';
+
     key: string;
     content: Record<string, any>;
     importance?: number;
@@ -301,13 +184,14 @@ export class ContextTool {
       return {
         success: true,
         data: memory,
-        reasoning: `Stored semantic memory: ${params.key} with importance ${params.importance || 1}`,
+        reasoning: `Stored semantic memory ${params.key}`,
       };
     } catch (error: any) {
       this.logger.error(
         `Failed to store semantic context: ${error.message}`,
         error.stack,
       );
+
       return {
         success: false,
         data: null,
@@ -317,16 +201,14 @@ export class ContextTool {
   }
 
   /**
-   * Get semantic context by topic
+   * Retrieve semantic context
    */
   async getSemanticContext(
     userId: string,
     memoryType: string,
   ): Promise<ToolResult> {
     try {
-      this.logger.debug(
-        `Getting semantic context: ${memoryType} for user ${userId}`,
-      );
+      this.logger.debug(`Getting semantic context ${memoryType} for ${userId}`);
 
       const context = await this.memoryService.getSemanticContext(
         userId,
@@ -337,13 +219,14 @@ export class ContextTool {
       return {
         success: true,
         data: context,
-        reasoning: `Retrieved ${context.length} semantic memories of type ${memoryType}`,
+        reasoning: `Retrieved ${context.length} semantic memories`,
       };
     } catch (error: any) {
       this.logger.error(
         `Failed to get semantic context: ${error.message}`,
         error.stack,
       );
+
       return {
         success: false,
         data: [],
@@ -353,16 +236,14 @@ export class ContextTool {
   }
 
   /**
-   * Build context summary for the agent
+   * Build context summary
    */
   async buildContextSummary(
     userId: string,
     sessionId: string,
   ): Promise<ToolResult> {
     try {
-      this.logger.debug(
-        `Building context summary for user ${userId}, session ${sessionId}`,
-      );
+      this.logger.debug(`Building summary for ${userId}`);
 
       const conversationHistory =
         await this.memoryService.getConversationHistory(userId, sessionId, {
@@ -379,8 +260,11 @@ export class ContextTool {
         userId,
         sessionId,
         conversationLength: conversationHistory.length,
+
         recentQueries: conversationHistory.map((t) => t.userQuery),
+
         topicsOfInterest: recentTopics.map((t) => t.key),
+
         lastInteraction:
           conversationHistory[conversationHistory.length - 1]?.createdAt,
       };
@@ -388,17 +272,18 @@ export class ContextTool {
       return {
         success: true,
         data: summary,
-        reasoning: `Built context summary with ${conversationHistory.length} turns and ${recentTopics.length} topics`,
+        reasoning: `Built context summary`,
       };
     } catch (error: any) {
       this.logger.error(
-        `Failed to build context summary: ${error.message}`,
+        `Failed building summary: ${error.message}`,
         error.stack,
       );
+
       return {
         success: false,
         data: null,
-        reasoning: `Failed to build context summary: ${error.message}`,
+        reasoning: `Failed building summary: ${error.message}`,
       };
     }
   }

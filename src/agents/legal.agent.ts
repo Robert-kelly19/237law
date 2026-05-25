@@ -4,6 +4,17 @@ import { CitationTool } from './tools/citation.tool';
 import { ContextTool } from './tools/context.tool';
 import { MemoryService } from '../memory/memory.service';
 import { ConversationService } from '../memory/conversation.service';
+import OpenAI from 'openai';
+
+/**
+ * Core legal article type used across RAG pipeline
+ */
+export interface LawArticle {
+  id: string;
+  lawName: string;
+  articleNumber: string;
+  content: string;
+}
 
 export interface AgentQuery {
   userId: string;
@@ -16,7 +27,6 @@ export interface AgentResponse {
   answer: string;
   citations: any[];
   reasoning: {
-    topic: string;
     confidence: number;
     toolsUsed: string[];
     steps: any[];
@@ -33,10 +43,18 @@ interface ReasoningStep {
   confidence: number;
 }
 
+type ToolExecutionResult = {
+  searchResults: LawArticle[];
+  semanticResults: LawArticle[];
+  crossReferences: LawArticle[];
+  overallConfidence: number;
+};
+
 @Injectable()
 export class LegalAgentService {
   private readonly logger = new Logger(LegalAgentService.name);
   private reasoningSteps: ReasoningStep[] = [];
+  private readonly openai: OpenAI;
 
   constructor(
     private lawSearchTool: LawSearchTool,
@@ -44,10 +62,14 @@ export class LegalAgentService {
     private contextTool: ContextTool,
     private memoryService: MemoryService,
     private conversationService: ConversationService,
-  ) {}
+  ) {
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
 
   /**
-   * Main agent entry point - processes a user query
+   * MAIN ENTRY POINT
    */
   async processQuery(query: AgentQuery): Promise<AgentResponse> {
     this.reasoningSteps = [];
@@ -57,55 +79,53 @@ export class LegalAgentService {
         `Processing query for user ${query.userId}: ${query.query}`,
       );
 
-      // Step 1: Classify and identify topic
-      const classification = await this.classifyQuery(query.query);
+      // STEP 1: Lightweight intent analysis (NO taxonomy)
+      const analysis = this.analyzeQuery(query.query);
+
       this.addReasoningStep({
         step: 1,
-        action: 'classify',
+        action: 'analyze_query',
         input: query.query,
-        output: classification,
-        confidence: classification.confidence,
+        output: analysis,
+        confidence: analysis.confidence,
       });
 
-      if (!classification.isLegalQuestion) {
-        return this.buildRefusalResponse(
-          'I can only assist with Cameroonian law questions.',
-          classification,
-        );
-      }
-
-      // Step 2: Get or create session and context
+      // STEP 2: Session handling
       let sessionId = query.sessionId;
+
       if (!sessionId) {
         sessionId = await this.conversationService.getOrCreateSession(
           query.userId,
         );
       }
 
-      const conversationContext = await this.contextTool.buildContextSummary(
+      const context = await this.contextTool.buildContextSummary(
         query.userId,
         sessionId,
       );
+
       this.addReasoningStep({
         step: 2,
         action: 'context',
         input: sessionId,
-        output: conversationContext.data,
+        output: context.data,
         confidence: 1.0,
       });
 
-      // Step 3: Plan tool usage
-      const toolPlan = this.planToolUsage(classification);
+      // STEP 3: Tool plan (always semantic-first RAG)
+      const toolPlan = this.planToolUsage();
+
       this.addReasoningStep({
         step: 3,
-        action: 'plan',
-        input: JSON.stringify(classification),
+        action: 'plan_tools',
+        input: query.query,
         output: toolPlan,
         confidence: 1.0,
       });
 
-      // Step 4: Execute tools
+      // STEP 4: Execute retrieval tools
       const toolResults = await this.executeTools(toolPlan, query.query);
+
       this.addReasoningStep({
         step: 4,
         action: 'execute_tools',
@@ -114,12 +134,9 @@ export class LegalAgentService {
         confidence: toolResults.overallConfidence,
       });
 
-      // Step 5: Synthesize results
-      const synthesis = this.synthesizeResults(
-        query.query,
-        toolResults,
-        classification,
-      );
+      // STEP 5: RAG synthesis
+      const synthesis = await this.synthesizeResults(query.query, toolResults);
+
       this.addReasoningStep({
         step: 5,
         action: 'synthesize',
@@ -128,7 +145,7 @@ export class LegalAgentService {
         confidence: 1.0,
       });
 
-      // Step 6: Store conversation turn
+      // STEP 6: Store conversation
       const turnNumber =
         await this.conversationService.getNextTurnNumber(sessionId);
 
@@ -139,38 +156,30 @@ export class LegalAgentService {
         userQuery: query.query,
         response: synthesis.answer,
         toolsUsed: synthesis.toolsUsed,
-        lawSectionsRef: synthesis.citedArticles.map((a: any) => a.id),
+        lawSectionsRef: synthesis.citedArticles.map((a) => a.id),
         agentThought: {
-          topic: classification.topic,
-          confidence: classification.confidence,
+          confidence: analysis.confidence,
           reasoning: this.reasoningSteps,
         },
       });
 
-      // Step 7: Store semantic memory
-      if (classification.topic !== 'general') {
-        await this.contextTool.storeSemanticContext({
-          userId: query.userId,
-          memoryType: 'topic',
-          key: classification.topic,
-          content: {
-            lastAsked: new Date().toISOString(),
-            queryCount: 1,
-          },
-          importance: Math.ceil(classification.confidence * 5),
-        });
-      }
-
-      this.logger.debug(
-        `Successfully processed query for user ${query.userId}`,
-      );
+      // STEP 7: Store semantic memory (no topics)
+      await this.contextTool.storeSemanticContext({
+        userId: query.userId,
+        memoryType: 'user_preference',
+        key: 'legal_query',
+        content: {
+          query: query.query,
+          timestamp: new Date().toISOString(),
+        },
+        importance: 3,
+      });
 
       return {
         answer: synthesis.answer,
         citations: synthesis.citations,
         reasoning: {
-          topic: classification.topic,
-          confidence: classification.confidence,
+          confidence: analysis.confidence,
           toolsUsed: synthesis.toolsUsed,
           steps: this.reasoningSteps,
         },
@@ -178,72 +187,51 @@ export class LegalAgentService {
         conversationTurnId: conversationTurn.id,
       };
     } catch (error: any) {
-      this.logger.error(
-        `Query processing failed: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(error.message, error.stack);
       throw error;
     }
   }
 
   /**
-   * Classify the incoming query
+   * Lightweight semantic intent detection (NO taxonomy)
    */
-  private async classifyQuery(query: string): Promise<{
-    topic: string;
+  private analyzeQuery(query: string): {
     isLegalQuestion: boolean;
     confidence: number;
     requiresCrossRef: boolean;
-  }> {
-    const topicResult = this.contextTool.getTopic(query);
+  } {
+    const q = query.toLowerCase();
 
-    if (!topicResult.success) {
-      return {
-        topic: 'general',
-        isLegalQuestion: false,
-        confidence: 0,
-        requiresCrossRef: false,
-      };
-    }
+    const hints = [
+      'law',
+      'legal',
+      'court',
+      'rights',
+      'police',
+      'arrest',
+      'contract',
+      'judge',
+      'warrant',
+      'sue',
+    ];
 
-    const topic = topicResult.data.primaryTopic;
-    const confidence = topicResult.data.confidence;
-
-    // Determine if cross-referencing is needed based on keywords
-    const requiresCrossRef =
-      /\b(related|also|further|connection|implication|impact|effect)\b/i.test(
-        query,
-      );
+    const score = hints.filter((h) => q.includes(h)).length;
 
     return {
-      topic,
-      isLegalQuestion: confidence > 0.3 || topic !== 'general',
-      confidence: Math.max(confidence, 0.5),
-      requiresCrossRef,
+      isLegalQuestion: true,
+      confidence: Math.min(0.5 + score * 0.1, 1),
+      requiresCrossRef: /\b(related|impact|effect|implication)\b/i.test(query),
     };
   }
 
   /**
-   * Plan which tools to use
+   * Always semantic-first tool planning
    */
-  private planToolUsage(classification: any): {
+  private planToolUsage(): {
     tools: string[];
     sequence: string;
   } {
-    const tools: string[] = [];
-
-    // Primary search tool
-    tools.push('search_by_keyword');
-
-    // Add topic-specific searches
-    if (classification.topic !== 'general') {
-      tools.push('search_by_topic');
-    }
-
-    // Add cross-reference tool if needed
-    if (classification.requiresCrossRef) {
-      tools.push('get_cross_references');
-    }
+    const tools = ['search_semantic'];
 
     return {
       tools,
@@ -252,59 +240,33 @@ export class LegalAgentService {
   }
 
   /**
-   * Execute the planned tools
+   * TOOL EXECUTION (fully typed)
    */
   private async executeTools(
     toolPlan: any,
     query: string,
-  ): Promise<{
-    searchResults: any[];
-    topicResults: any[];
-    crossReferences: any[];
-    overallConfidence: number;
-  }> {
-    const results = {
+  ): Promise<ToolExecutionResult> {
+    const results: ToolExecutionResult = {
       searchResults: [],
-      topicResults: [],
+      semanticResults: [],
       crossReferences: [],
       overallConfidence: 1.0,
     };
 
     try {
-      // Execute keyword search
-      if (toolPlan.tools.includes('search_by_keyword')) {
-        const searchResult = await this.lawSearchTool.searchByKeyword(query, 5);
-        if (searchResult.success) {
-          results.searchResults = searchResult.data;
+      // Semantic search only
+      if (toolPlan.tools.includes('search_semantic')) {
+        const res = await this.lawSearchTool.searchByTopic(query, 5);
+
+        if (res.success) {
+          results.semanticResults = res.data;
         }
       }
 
-      // Execute topic search
-      if (toolPlan.tools.includes('search_by_topic')) {
-        const topicResult = await this.lawSearchTool.searchByTopic(query, 3);
-        if (topicResult.success) {
-          results.topicResults = topicResult.data;
-        }
-      }
-
-      // Execute cross-reference search
-      if (
-        toolPlan.tools.includes('get_cross_references') &&
-        results.searchResults.length > 0
-      ) {
-        const primaryArticle: any = results.searchResults[0];
-        const crossRefResult = await this.lawSearchTool.getCrossReferences(
-          primaryArticle.id,
-          3,
-        );
-        if (crossRefResult.success) {
-          results.crossReferences = crossRefResult.data;
-        }
-      }
-
-      results.overallConfidence = 0.95;
+      results.overallConfidence =
+        results.semanticResults.length > 0 ? 0.9 : 0.3;
     } catch (error: any) {
-      this.logger.error(`Tool execution failed: ${error.message}`);
+      this.logger.error(error.message);
       results.overallConfidence = 0.6;
     }
 
@@ -312,105 +274,146 @@ export class LegalAgentService {
   }
 
   /**
-   * Synthesize tool results into a coherent answer
+   * RAG synthesis with LLM (same as ask route)
    */
-  private synthesizeResults(
+  private async synthesizeResults(
     query: string,
-    toolResults: any,
-    classification: any,
-  ): {
+    toolResults: ToolExecutionResult,
+  ): Promise<{
     answer: string;
     citations: any[];
     citedArticles: any[];
     toolsUsed: string[];
     relatedArticles: any[];
-  } {
-    const allArticles = [
-      ...toolResults.searchResults,
-      ...toolResults.topicResults,
-    ];
+  }> {
+    const unique = toolResults.semanticResults;
 
-    // Remove duplicates by ID
-    const uniqueArticles = Array.from(
-      new Map(allArticles.map((a) => [a.id, a])).values(),
+    const citations = unique.map((a) =>
+      this.citationTool.generateInlineCitation(a),
     );
 
-    // Generate citations
-    const citations = uniqueArticles.map((article: any) =>
-      this.citationTool.generateInlineCitation(article),
-    );
+    let answer: string;
 
-    // Build answer
-    let answer = '';
+    if (unique.length === 0) {
+      answer = `Sorry, I couldn't find a clear legal answer for your question.
 
-    if (uniqueArticles.length === 0) {
-      answer =
-        'I was unable to find specific Cameroonian law provisions directly addressing your question. ' +
-        'Could you rephrase your question or provide more details about which area of law you are interested in?';
+NB: This response is provided for informational purposes only and does not constitute legal advice.
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
     } else {
-      const primaryArticle: any = uniqueArticles[0];
-      answer =
-        `Based on Cameroonian law, specifically ${this.citationTool.generateInlineCitation(primaryArticle)}:\n\n` +
-        `${primaryArticle.content}\n\n` +
-        (uniqueArticles.length > 1
-          ? `This provision is related to:\n${uniqueArticles
-              .slice(1)
-              .map(
-                (a: any) => `- ${this.citationTool.generateInlineCitation(a)}`,
-              )
-              .join('\n')}`
-          : '');
-    }
+      const context = unique
+        .map((s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`)
+        .join('\n\n');
 
-    // Prepare related articles
-    const relatedArticles = toolResults.crossReferences.slice(0, 3);
+      const prompt = `
+You are a professional legal assistant specializing exclusively in Cameroonian law. You help ordinary citizens, entrepreneurs, students, and professionals understand their legal rights and obligations under Cameroonian legislation.
+
+---
+
+IDENTITY & SCOPE:
+- You only advise on Cameroonian law (OHADA, Penal Code, Civil Code, Criminal Procedure Code, Labour Code, Commercial Code, and other applicable Cameroonian statutes).
+- You do NOT answer questions about foreign legal systems unless comparing them to Cameroonian law at the user's explicit request.
+- You are NOT a substitute for a qualified lawyer. Always remind users of this at the end.
+
+---
+
+CORE RULES — NEVER VIOLATE THESE:
+1. NEVER invent, fabricate, or paraphrase laws. Only cite laws explicitly found in the provided context.
+2. NEVER use internal identifiers such as "chunk-*", "doc-*", or any database IDs.
+3. NEVER start your response with "Yes" or "No" unless the question is a direct yes/no question (e.g., "Is it legal to…?").
+4. If the context contains NO relevant legal provision, respond EXACTLY with: "No clear legal provision was found in the available laws for this question. Please consult a qualified Cameroonian lawyer."
+5. Do NOT speculate or fill gaps with general legal knowledge when the context is silent.
+
+---
+
+CITATION RULES:
+- Always cite the exact article/section number and full law name (e.g., "Article 74 of the Cameroonian Penal Code").
+- If multiple laws apply (e.g., Penal Code AND Criminal Procedure Code), you MUST cite ALL relevant ones and explain what each contributes.
+- If the same topic is covered by both a general law and a special law (e.g., OHADA vs. national Commercial Code), note which one takes precedence and why.
+- Never merge or paraphrase two different articles as if they are one.
+
+---
+
+RESPONSE LOGIC — FOLLOW THIS DECISION TREE:
+- If the question is "what do I need" / "what are the steps" / "how do I…": → Use a numbered list of requirements or steps.
+- If the question is "is it legal" / "can I…" / "am I allowed to…": → State the legal position clearly, then cite the law.
+- If the question involves a penalty or crime: → State the act, the applicable law, and the penalty range.
+- If the question involves a contract or civil matter: → State the relevant civil/OHADA rule and any formality requirements.
+- If multiple laws conflict or overlap: → Explain the difference clearly and state which one applies in this situation.
+
+---
+
+LANGUAGE & TONE:
+- Use simple, everyday English (or French if the user writes in French).
+- Write short paragraphs — maximum 3 sentences each.
+- Avoid legal jargon. If a legal term must be used, define it immediately in plain language.
+- Be warm and reassuring — many users may be stressed or intimidated.
+
+---
+
+REQUIRED OUTPUT FORMAT:
+
+**Summary**
+[One to two sentences giving the direct answer in plain language.]
+
+**Legal Basis**
+- Article/Section [X] of [Full Law Name]: [One sentence explaining what this article says in simple terms.]
+- Article/Section [Y] of [Full Law Name] (if applicable): [One sentence explanation.]
+
+**What This Means for You**
+[Two to four sentences explaining the practical implication for the user's specific situation.]
+
+**Key Difference** *(only if two or more laws apply)*
+[Explain in one to three sentences what each law covers and how they differ.]
+
+**Penalty or Consequence** *(only if mentioned in the context)*
+[State the penalty range or legal consequence clearly.]
+
+**Important Notice**
+This response is for informational purposes only and does not constitute legal advice. For proper legal assistance tailored to your situation, please consult a qualified Cameroonian lawyer.
+
+---
+
+Context (verified legal sources only):
+${context}
+
+User Question:
+${query}
+
+Answer:
+`;
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 500,
+      });
+
+      answer = response.choices?.[0]?.message?.content?.trim() || '';
+
+      if (!answer) {
+        answer = `Sorry, I couldn't find a clear legal answer for your question.
+
+NB: This response is provided for informational purposes only and does not constitute legal advice.
+For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
+      }
+    }
 
     return {
       answer,
       citations,
-      citedArticles: uniqueArticles.map((a: any) => ({
+      citedArticles: unique.map((a) => ({
         id: a.id,
         lawName: a.lawName,
         articleNumber: a.articleNumber,
       })),
-      toolsUsed: [
-        'search_by_keyword',
-        'search_by_topic',
-        'get_cross_references',
-      ].filter((t) => {
-        if (t === 'search_by_keyword')
-          return toolResults.searchResults.length > 0;
-        if (t === 'search_by_topic') return toolResults.topicResults.length > 0;
-        if (t === 'get_cross_references')
-          return toolResults.crossReferences.length > 0;
-        return false;
-      }),
-      relatedArticles,
-    };
-  }
-
-  /**
-   * Build a refusal response for non-legal questions
-   */
-  private buildRefusalResponse(
-    message: string,
-    classification: any,
-  ): AgentResponse {
-    return {
-      answer: message,
-      citations: [],
-      reasoning: {
-        topic: classification.topic,
-        confidence: classification.confidence,
-        toolsUsed: [],
-        steps: this.reasoningSteps,
-      },
+      toolsUsed: ['semantic_search'],
       relatedArticles: [],
     };
   }
 
   /**
-   * Add a reasoning step
+   * Add reasoning step
    */
   private addReasoningStep(step: ReasoningStep): void {
     this.reasoningSteps.push(step);
