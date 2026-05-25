@@ -104,6 +104,7 @@ export class WhatsappController {
             // Use the agent with memory (sessions managed by agent via ConversationService)
             const response = await this.legalAgent.processQuery({
               userId: from,
+              sessionId: from,
               query: text,
             });
 
