@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
-import { RagService } from '../rag.service';
 import { LegalAgentService } from '../agents/legal.agent';
 
 interface WhatsappWebhookBody {
@@ -59,7 +58,6 @@ export class WhatsappController {
 
   constructor(
     private whatsappService: WhatsappService,
-    private ragService: RagService,
     private legalAgent: LegalAgentService,
   ) {}
 
@@ -103,10 +101,9 @@ export class WhatsappController {
           if (!from || !text) continue;
 
           try {
-            // Use the agent with memory like askWithAgent endpoint
+            // Use the agent with memory (sessions managed by agent via ConversationService)
             const response = await this.legalAgent.processQuery({
-              userId: from, // Use WhatsApp number as user ID
-              sessionId: from, // Use WhatsApp number as session ID (could also be undefined)
+              userId: from,
               query: text,
             });
 

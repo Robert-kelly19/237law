@@ -53,7 +53,6 @@ type ToolExecutionResult = {
 @Injectable()
 export class LegalAgentService {
   private readonly logger = new Logger(LegalAgentService.name);
-  private reasoningSteps: ReasoningStep[] = [];
   private readonly openai: OpenAI;
 
   constructor(
@@ -72,7 +71,11 @@ export class LegalAgentService {
    * MAIN ENTRY POINT
    */
   async processQuery(query: AgentQuery): Promise<AgentResponse> {
-    this.reasoningSteps = [];
+    const reasoningSteps: ReasoningStep[] = [];
+
+    const addReasoningStep = (step: ReasoningStep): void => {
+      reasoningSteps.push(step);
+    };
 
     try {
       this.logger.debug(
@@ -82,7 +85,7 @@ export class LegalAgentService {
       // STEP 1: Lightweight intent analysis (NO taxonomy)
       const analysis = this.analyzeQuery(query.query);
 
-      this.addReasoningStep({
+      addReasoningStep({
         step: 1,
         action: 'analyze_query',
         input: query.query,
@@ -104,7 +107,7 @@ export class LegalAgentService {
         sessionId,
       );
 
-      this.addReasoningStep({
+      addReasoningStep({
         step: 2,
         action: 'context',
         input: sessionId,
@@ -115,7 +118,7 @@ export class LegalAgentService {
       // STEP 3: Tool plan (always semantic-first RAG)
       const toolPlan = this.planToolUsage();
 
-      this.addReasoningStep({
+      addReasoningStep({
         step: 3,
         action: 'plan_tools',
         input: query.query,
@@ -126,7 +129,7 @@ export class LegalAgentService {
       // STEP 4: Execute retrieval tools
       const toolResults = await this.executeTools(toolPlan, query.query);
 
-      this.addReasoningStep({
+      addReasoningStep({
         step: 4,
         action: 'execute_tools',
         input: JSON.stringify(toolPlan),
@@ -137,7 +140,7 @@ export class LegalAgentService {
       // STEP 5: RAG synthesis
       const synthesis = await this.synthesizeResults(query.query, toolResults);
 
-      this.addReasoningStep({
+      addReasoningStep({
         step: 5,
         action: 'synthesize',
         input: JSON.stringify(toolResults),
@@ -159,7 +162,8 @@ export class LegalAgentService {
         lawSectionsRef: synthesis.citedArticles.map((a) => a.id),
         agentThought: {
           confidence: analysis.confidence,
-          reasoning: this.reasoningSteps,
+          reasoning: reasoningSteps,
+          topic: this.extractTopic(query.query),
         },
       });
 
@@ -181,7 +185,7 @@ export class LegalAgentService {
         reasoning: {
           confidence: analysis.confidence,
           toolsUsed: synthesis.toolsUsed,
-          steps: this.reasoningSteps,
+          steps: reasoningSteps,
         },
         relatedArticles: synthesis.relatedArticles,
         conversationTurnId: conversationTurn.id,
@@ -413,9 +417,26 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
   }
 
   /**
-   * Add reasoning step
+   * Extract topic from query for conversation tracking
    */
-  private addReasoningStep(step: ReasoningStep): void {
-    this.reasoningSteps.push(step);
+  private extractTopic(query: string): string {
+    const q = query.toLowerCase();
+
+    const topics: Record<string, string[]> = {
+      'property law': ['property', 'land', 'rent', 'lease', 'tenant', 'landlord'],
+      'criminal law': ['crime', 'criminal', 'arrest', 'warrant', 'police', 'court'],
+      'contract law': ['contract', 'agreement', 'sign', 'breach', 'offer'],
+      'employment law': ['job', 'work', 'employ', 'salary', 'worker', 'boss'],
+      'family law': ['marriage', 'divorce', 'child', 'custody', 'alimony'],
+      'business law': ['company', 'business', 'corporation', 'startup'],
+    };
+
+    for (const [topic, keywords] of Object.entries(topics)) {
+      if (keywords.some((k) => q.includes(k))) {
+        return topic;
+      }
+    }
+
+    return 'general legal inquiry';
   }
 }
