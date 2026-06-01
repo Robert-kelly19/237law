@@ -10,6 +10,8 @@ async function bootstrap() {
   // Validate required environment variables
   validateRequiredEnvVars([
     'WHATSAPP_VERIFY_TOKEN',
+    'WHATSAPP_ACCESS_TOKEN',
+    'WHATSAPP_PHONE_NUMBER_ID',
     'OPENAI_API_KEY',
     'DATABASE_URL',
   ]);

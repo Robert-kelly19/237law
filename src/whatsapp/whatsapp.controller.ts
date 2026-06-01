@@ -115,10 +115,17 @@ export class WhatsappController {
               `Agent processing error: ${err instanceof Error ? err.message : String(err)}`,
               err instanceof Error ? err.stack : undefined,
             );
-            await this.whatsappService.send(
-              from,
-              'Something went wrong. Try again later.',
-            );
+            try {
+              await this.whatsappService.send(
+                from,
+                'Something went wrong. Try again later.',
+              );
+            } catch (sendErr) {
+              this.logger.error(
+                `Fallback message also failed: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`,
+                sendErr instanceof Error ? sendErr.stack : undefined,
+              );
+            }
           }
         }
       }
