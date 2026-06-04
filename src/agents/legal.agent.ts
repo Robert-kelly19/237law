@@ -86,7 +86,7 @@ export class LegalAgentService {
 
       try {
         this.logger.debug(
-          `Processing query for user ${query.userId} (length: ${query.query.length})`,
+          `Processing query for (length: ${query.query.length})`,
         );
 
         // STEP 1: Lightweight intent analysis (NO taxonomy)
