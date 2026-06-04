@@ -15,6 +15,10 @@ import { ConversationService } from './memory/conversation.service';
 import { ConfigModule } from '@nestjs/config';
 import { LegalAgentService } from './agents/legal.agent';
 import { ContextTool } from './agents/tools/context.tool';
+import { EmbeddingCacheService } from './cache/embedding-cache.service';
+import { LLMResponseCacheService } from './cache/llm-response-cache.service';
+import { PerformanceTrackerService } from './performance/performance-tracker.service';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -35,6 +39,9 @@ import { ContextTool } from './agents/tools/context.tool';
     ContextTool,
     MemoryService,
     ConversationService,
+    EmbeddingCacheService,
+    LLMResponseCacheService,
+    PerformanceTrackerService,
   ],
 })
 export class AppModule {}

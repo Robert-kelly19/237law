@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { EmbeddingService } from '../../embedding.service';
+import { PerformanceTrackerService } from '../../performance/performance-tracker.service';
 
 export interface ToolResult {
   success: boolean;
@@ -24,84 +25,103 @@ export class LawSearchTool {
   constructor(
     private prisma: PrismaService,
     private embeddingService: EmbeddingService,
+    private performanceTracker: PerformanceTrackerService,
   ) {}
 
   /**
-   * Search law sections by keyword
+   * Search law sections by keyword with performance tracking
    */
   async searchByKeyword(query: string, limit: number = 5): Promise<ToolResult> {
-    try {
-      this.logger.debug(`Searching by keyword: ${query} (limit: ${limit})`);
+    return this.performanceTracker.track(
+      `searchByKeyword[${query.substring(0, 20)}...]`,
+      async () => {
+        try {
+          this.logger.debug(
+            `Searching by keyword: ${query} (limit: ${limit})`,
+          );
 
-      // Full-text search using PostgreSQL
-      const results = await this.prisma.$queryRaw<LawSearchResult[]>`
-        SELECT 
-          id,
-          "lawName",
-          "articleNumber",
-          content,
-          source
-        FROM law_sections
-        WHERE 
-          to_tsvector('english', content) @@ plainto_tsquery('english', ${query})
-          OR to_tsvector('english', "lawName") @@ plainto_tsquery('english', ${query})
-          OR to_tsvector('english', "articleNumber") @@ plainto_tsquery('english', ${query})
-        LIMIT ${limit}
-      `;
+          // Full-text search using PostgreSQL
+          const results = await this.prisma.$queryRaw<LawSearchResult[]>`
+            SELECT 
+              id,
+              "lawName",
+              "articleNumber",
+              content,
+              source
+            FROM law_sections
+            WHERE 
+              to_tsvector('english', content) @@ plainto_tsquery('english', ${query})
+              OR to_tsvector('english', "lawName") @@ plainto_tsquery('english', ${query})
+              OR to_tsvector('english', "articleNumber") @@ plainto_tsquery('english', ${query})
+            LIMIT ${limit}
+          `;
 
-      return {
-        success: true,
-        data: results,
-        reasoning: `Found ${results.length} law sections matching keyword "${query}"`,
-      };
-    } catch (error: any) {
-      this.logger.error(`Keyword search failed: ${error.message}`, error.stack);
-      return {
-        success: false,
-        data: [],
-        reasoning: `Keyword search failed: ${error.message}`,
-      };
-    }
+          return {
+            success: true,
+            data: results,
+            reasoning: `Found ${results.length} law sections matching keyword "${query}"`,
+          };
+        } catch (error: any) {
+          this.logger.error(
+            `Keyword search failed: ${error.message}`,
+            error.stack,
+          );
+          return {
+            success: false,
+            data: [],
+            reasoning: `Keyword search failed: ${error.message}`,
+          };
+        }
+      },
+    );
   }
 
   /**
-   * Search law sections by semantic similarity
+   * Search law sections by semantic similarity with performance tracking
    */
   async searchByTopic(topic: string, limit: number = 5): Promise<ToolResult> {
-    try {
-      this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);
+    return this.performanceTracker.track(
+      `searchByTopic_vector[${topic.substring(0, 20)}...]`,
+      async () => {
+        try {
+          this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);
 
-      // Generate embedding for the topic
-      const topicEmbedding =
-        await this.embeddingService.generateQueryEmbedding(topic);
+          // Generate embedding for the topic (with caching)
+          const topicEmbedding =
+            await this.embeddingService.generateQueryEmbedding(topic);
 
-      // Vector similarity search using PostgreSQL
-      const results = await this.prisma.$queryRaw<any[]>`
-        SELECT 
-          id,
-          "lawName",
-          "articleNumber",
-          content,
-          source,
-          1 - (embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector) as distance
-        FROM law_sections
-        ORDER BY embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector
-        LIMIT ${limit}
-      `;
+          // Vector similarity search using PostgreSQL with HNSW index
+          const results = await this.prisma.$queryRaw<any[]>`
+            SELECT 
+              id,
+              "lawName",
+              "articleNumber",
+              content,
+              source,
+              1 - (embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector) as distance
+            FROM law_sections
+            ORDER BY embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector
+            LIMIT ${limit}
+          `;
 
-      return {
-        success: true,
-        data: results,
-        reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
-      };
-    } catch (error: any) {
-      this.logger.error(`Topic search failed: ${error.message}`, error.stack);
-      return {
-        success: false,
-        data: [],
-        reasoning: `Topic search failed: ${error.message}`,
-      };
-    }
+          return {
+            success: true,
+            data: results,
+            reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
+          };
+        } catch (error: any) {
+          this.logger.error(
+            `Topic search failed: ${error.message}`,
+            error.stack,
+          );
+          return {
+            success: false,
+            data: [],
+            reasoning: `Topic search failed: ${error.message}`,
+          };
+        }
+      },
+    );
   }
 
   /**

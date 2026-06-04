@@ -4,6 +4,9 @@ import { CitationTool } from './tools/citation.tool';
 import { ContextTool } from './tools/context.tool';
 import { MemoryService } from '../memory/memory.service';
 import { ConversationService } from '../memory/conversation.service';
+import { PerformanceTrackerService } from '../performance/performance-tracker.service';
+import { LLMResponseCacheService } from '../cache/llm-response-cache.service';
+import { EmbeddingService } from '../embedding.service';
 import OpenAI from 'openai';
 
 /**
@@ -61,6 +64,9 @@ export class LegalAgentService {
     private contextTool: ContextTool,
     private memoryService: MemoryService,
     private conversationService: ConversationService,
+    private performanceTracker: PerformanceTrackerService,
+    private llmCacheService: LLMResponseCacheService,
+    private embeddingService: EmbeddingService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -71,129 +77,155 @@ export class LegalAgentService {
    * MAIN ENTRY POINT
    */
   async processQuery(query: AgentQuery): Promise<AgentResponse> {
-    const reasoningSteps: ReasoningStep[] = [];
+    return this.performanceTracker.track('processQuery', async () => {
+      const reasoningSteps: ReasoningStep[] = [];
 
-    const addReasoningStep = (step: ReasoningStep): void => {
-      reasoningSteps.push(step);
-    };
-
-    try {
-      this.logger.debug(
-        `Processing query for user ${query.userId}: ${query.query}`,
-      );
-
-      // STEP 1: Lightweight intent analysis (NO taxonomy)
-      const analysis = this.analyzeQuery(query.query);
-
-      addReasoningStep({
-        step: 1,
-        action: 'analyze_query',
-        input: query.query,
-        output: analysis,
-        confidence: analysis.confidence,
-      });
-
-      // STEP 2: Session handling
-      let sessionId = query.sessionId;
-
-      if (!sessionId) {
-        sessionId = await this.conversationService.getOrCreateSession(
-          query.userId,
-        );
-      }
-
-      const context = await this.contextTool.buildContextSummary(
-        query.userId,
-        sessionId,
-      );
-
-      addReasoningStep({
-        step: 2,
-        action: 'context',
-        input: sessionId,
-        output: context.data,
-        confidence: 1.0,
-      });
-
-      // STEP 3: Tool plan (always semantic-first RAG)
-      const toolPlan = this.planToolUsage();
-
-      addReasoningStep({
-        step: 3,
-        action: 'plan_tools',
-        input: query.query,
-        output: toolPlan,
-        confidence: 1.0,
-      });
-
-      // STEP 4: Execute retrieval tools
-      const toolResults = await this.executeTools(toolPlan, query.query);
-
-      addReasoningStep({
-        step: 4,
-        action: 'execute_tools',
-        input: JSON.stringify(toolPlan),
-        output: toolResults,
-        confidence: toolResults.overallConfidence,
-      });
-
-      // STEP 5: RAG synthesis
-      const synthesis = await this.synthesizeResults(query.query, toolResults);
-
-      addReasoningStep({
-        step: 5,
-        action: 'synthesize',
-        input: JSON.stringify(toolResults),
-        output: synthesis,
-        confidence: 1.0,
-      });
-
-      // STEP 6: Store conversation
-      const turnNumber =
-        await this.conversationService.getNextTurnNumber(sessionId);
-
-      const conversationTurn = await this.memoryService.storeConversation({
-        userId: query.userId,
-        sessionId,
-        turnNumber,
-        userQuery: query.query,
-        response: synthesis.answer,
-        toolsUsed: synthesis.toolsUsed,
-        lawSectionsRef: synthesis.citedArticles.map((a) => a.id),
-        agentThought: {
-          confidence: analysis.confidence,
-          reasoning: reasoningSteps,
-          topic: this.extractTopic(query.query),
-        },
-      });
-
-      // STEP 7: Store semantic memory (no topics)
-      await this.contextTool.storeSemanticContext({
-        userId: query.userId,
-        memoryType: 'user_preference',
-        key: 'legal_query',
-        content: {
-          query: query.query,
-          timestamp: new Date().toISOString(),
-        },
-        importance: 3,
-      });
-
-      return {
-        answer: synthesis.answer,
-        citations: synthesis.citations,
-        reasoning: {
-          confidence: analysis.confidence,
-          toolsUsed: synthesis.toolsUsed,
-          steps: reasoningSteps,
-        },
-        relatedArticles: synthesis.relatedArticles,
-        conversationTurnId: conversationTurn.id,
+      const addReasoningStep = (step: ReasoningStep): void => {
+        reasoningSteps.push(step);
       };
-    } catch (error: any) {
-      this.logger.error(error.message, error.stack);
-      throw error;
-    }
+
+      try {
+        this.logger.debug(
+          `Processing query for user ${query.userId}: ${query.query}`,
+        );
+
+        // STEP 1: Lightweight intent analysis (NO taxonomy)
+        const analysis = this.performanceTracker.trackSync(
+          'analyze_query',
+          () => this.analyzeQuery(query.query),
+        );
+
+        addReasoningStep({
+          step: 1,
+          action: 'analyze_query',
+          input: query.query,
+          output: analysis,
+          confidence: analysis.confidence,
+        });
+
+        // STEP 2 & 3: PARALLELIZE session, context, and embedding generation
+        // These operations are independent and can run in parallel
+        const [sessionId, context, topicEmbedding] = await Promise.all([
+          this.performanceTracker.track('getOrCreateSession', () =>
+            query.sessionId
+              ? Promise.resolve(query.sessionId)
+              : this.conversationService.getOrCreateSession(query.userId),
+          ),
+          this.performanceTracker.track('buildContextSummary', async () => {
+            // Note: context building needs sessionId, but we can start this immediately
+            // since Promise.all allows dependent operations
+            const sid = query.sessionId
+              ? query.sessionId
+              : await this.conversationService.getOrCreateSession(query.userId);
+            return this.contextTool.buildContextSummary(query.userId, sid);
+          }),
+          this.performanceTracker.track('generateQueryEmbedding', () =>
+            this.embeddingService.generateQueryEmbedding(query.query),
+          ),
+        ]);
+
+        addReasoningStep({
+          step: 2,
+          action: 'context',
+          input: sessionId,
+          output: context.data,
+          confidence: 1.0,
+        });
+
+        // STEP 4: Tool plan (always semantic-first RAG)
+        const toolPlan = this.performanceTracker.trackSync('plan_tools', () =>
+          this.planToolUsage(),
+        );
+
+        addReasoningStep({
+          step: 3,
+          action: 'plan_tools',
+          input: query.query,
+          output: toolPlan,
+          confidence: 1.0,
+        });
+
+        // STEP 5: Execute retrieval tools
+        const toolResults = await this.performanceTracker.track(
+          'execute_tools',
+          () => this.executeTools(toolPlan, query.query),
+        );
+
+        addReasoningStep({
+          step: 4,
+          action: 'execute_tools',
+          input: JSON.stringify(toolPlan),
+          output: toolResults,
+          confidence: toolResults.overallConfidence,
+        });
+
+        // STEP 6: RAG synthesis
+        const synthesis = await this.performanceTracker.track(
+          'synthesizeResults',
+          () => this.synthesizeResults(query.query, toolResults),
+        );
+
+        addReasoningStep({
+          step: 5,
+          action: 'synthesize',
+          input: JSON.stringify(toolResults),
+          output: synthesis,
+          confidence: 1.0,
+        });
+
+        // STEP 7 & 8: PARALLELIZE conversation storage and semantic memory
+        // These can happen in the background and don't block the response
+        const turnNumber = await this.performanceTracker.track(
+          'getNextTurnNumber',
+          () => this.conversationService.getNextTurnNumber(sessionId),
+        );
+
+        // Store conversation and semantic memory in parallel
+        // (fire and forget - don't wait for completion as they're not critical for response)
+        Promise.all([
+          this.memoryService.storeConversation({
+            userId: query.userId,
+            sessionId,
+            turnNumber,
+            userQuery: query.query,
+            response: synthesis.answer,
+            toolsUsed: synthesis.toolsUsed,
+            lawSectionsRef: synthesis.citedArticles.map((a) => a.id),
+            agentThought: {
+              confidence: analysis.confidence,
+              reasoning: reasoningSteps,
+              topic: this.extractTopic(query.query),
+            },
+          }),
+          this.contextTool.storeSemanticContext({
+            userId: query.userId,
+            memoryType: 'user_preference',
+            key: 'legal_query',
+            content: {
+              query: query.query,
+              timestamp: new Date().toISOString(),
+            },
+            importance: 3,
+          }),
+        ]).catch((err) => {
+          this.logger.error('Error storing conversation/memory in background:', err);
+        });
+
+        return {
+          answer: synthesis.answer,
+          citations: synthesis.citations,
+          reasoning: {
+            confidence: analysis.confidence,
+            toolsUsed: synthesis.toolsUsed,
+            steps: reasoningSteps,
+          },
+          relatedArticles: synthesis.relatedArticles,
+        };
+      } catch (error: any) {
+        this.logger.error(error.message, error.stack);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -278,7 +310,7 @@ export class LegalAgentService {
   }
 
   /**
-   * RAG synthesis with LLM (same as ask route)
+   * RAG synthesis with LLM and response caching
    */
   private async synthesizeResults(
     query: string,
@@ -290,25 +322,39 @@ export class LegalAgentService {
     toolsUsed: string[];
     relatedArticles: any[];
   }> {
-    const unique = toolResults.semanticResults;
+    return this.performanceTracker.track(
+      'rag_synthesis_with_llm',
+      async () => {
+        const unique = toolResults.semanticResults;
 
-    const citations = unique.map((a) =>
-      this.citationTool.generateInlineCitation(a),
-    );
+        const citations = unique.map((a) =>
+          this.citationTool.generateInlineCitation(a),
+        );
 
-    let answer: string;
+        // Check LLM response cache
+        const cacheKey = this.llmCacheService.generateKey(query, [
+          'semantic_search',
+        ]);
+        const cachedResponse = this.llmCacheService.get(cacheKey);
 
-    if (unique.length === 0) {
-      answer = `Sorry, I couldn't find a clear legal answer for your question.
+        let answer: string;
+
+        if (unique.length === 0) {
+          answer = `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-    } else {
-      const context = unique
-        .map((s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`)
-        .join('\n\n');
+        } else if (cachedResponse) {
+          this.logger.debug(`LLM response cache hit for query: ${query.substring(0, 50)}...`);
+          answer = cachedResponse;
+        } else {
+          const context = unique
+            .map(
+              (s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`,
+            )
+            .join('\n\n');
 
-      const prompt = `
+          const prompt = `
 You are a professional legal assistant specializing exclusively in Cameroonian law. You help ordinary citizens, entrepreneurs, students, and professionals understand their legal rights and obligations under Cameroonian legislation.
 
 ---
@@ -386,34 +432,43 @@ ${query}
 Answer:
 `;
 
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4.1-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 500,
-      });
+          const response = await this.performanceTracker.track(
+            'openai_chat_completion',
+            async () =>
+              this.openai.chat.completions.create({
+                model: 'gpt-4.1-mini',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3,
+                max_tokens: 500,
+              }),
+          );
 
-      answer = response.choices?.[0]?.message?.content?.trim() || '';
+          answer = response.choices?.[0]?.message?.content?.trim() || '';
 
-      if (!answer) {
-        answer = `Sorry, I couldn't find a clear legal answer for your question.
+          if (!answer) {
+            answer = `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-      }
-    }
+          } else {
+            // Cache the LLM response for future identical queries
+            this.llmCacheService.set(cacheKey, answer);
+          }
+        }
 
-    return {
-      answer,
-      citations,
-      citedArticles: unique.map((a) => ({
-        id: a.id,
-        lawName: a.lawName,
-        articleNumber: a.articleNumber,
-      })),
-      toolsUsed: ['semantic_search'],
-      relatedArticles: [],
-    };
+        return {
+          answer,
+          citations,
+          citedArticles: unique.map((a) => ({
+            id: a.id,
+            lawName: a.lawName,
+            articleNumber: a.articleNumber,
+          })),
+          toolsUsed: ['semantic_search'],
+          relatedArticles: [],
+        };
+      },
+    );
   }
 
   /**

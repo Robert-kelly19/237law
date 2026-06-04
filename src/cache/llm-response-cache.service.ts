@@ -1,0 +1,116 @@
+import { Injectable, Logger } from '@nestjs/common';
+
+/**
+ * In-memory cache for LLM responses with TTL
+ * Useful for caching frequent responses (e.g., common legal questions)
+ */
+interface LLMCacheEntry {
+  response: string;
+  timestamp: number;
+  hits: number;
+}
+
+@Injectable()
+export class LLMResponseCacheService {
+  private readonly logger = new Logger(LLMResponseCacheService.name);
+  private cache: Map<string, LLMCacheEntry> = new Map();
+  private readonly maxSize = 100; // LRU limit for LLM responses
+  private readonly ttl = 12 * 60 * 60 * 1000; // 12 hours
+
+  constructor() {
+    this.startCleanupInterval();
+  }
+
+  /**
+   * Get cached LLM response if exists and not expired
+   */
+  get(key: string): string | null {
+    const entry = this.cache.get(key);
+
+    if (!entry) {
+      return null;
+    }
+
+    const isExpired = Date.now() - entry.timestamp > this.ttl;
+    if (isExpired) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    entry.hits++;
+    entry.timestamp = Date.now();
+
+    return entry.response;
+  }
+
+  /**
+   * Store LLM response in cache
+   */
+  set(key: string, response: string): void {
+    // Evict LRU entry if cache is full
+    if (
+      this.cache.size >= this.maxSize &&
+      !this.cache.has(key)
+    ) {
+      const lruKey = Array.from(this.cache.entries()).reduce((min, [k, entry]) =>
+        entry.hits < min[1].hits ? [k, entry] : min,
+      )[0];
+      this.cache.delete(lruKey);
+    }
+
+    this.cache.set(key, {
+      response,
+      timestamp: Date.now(),
+      hits: 0,
+    });
+  }
+
+  /**
+   * Generate cache key from query context
+   */
+  generateKey(query: string, toolsUsed: string[]): string {
+    const key = `${query}|${toolsUsed.sort().join(',')}`;
+    return Buffer.from(key).toString('base64');
+  }
+
+  /**
+   * Clear entire cache
+   */
+  clear(): void {
+    this.cache.clear();
+    this.logger.log('LLM response cache cleared');
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getStats(): { size: number; maxSize: number } {
+    return {
+      size: this.cache.size,
+      maxSize: this.maxSize,
+    };
+  }
+
+  /**
+   * Periodically clean expired entries
+   */
+  private startCleanupInterval(): void {
+    setInterval(() => {
+      let cleaned = 0;
+      const now = Date.now();
+
+      for (const [key, entry] of this.cache.entries()) {
+        if (now - entry.timestamp > this.ttl) {
+          this.cache.delete(key);
+          cleaned++;
+        }
+      }
+
+      if (cleaned > 0) {
+        this.logger.debug(
+          `LLM response cache cleanup: removed ${cleaned} expired entries (${this.cache.size} remaining)`,
+        );
+      }
+    }, 60 * 60 * 1000); // Run every hour
+  }
+}
