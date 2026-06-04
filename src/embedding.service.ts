@@ -90,13 +90,13 @@ export class EmbeddingService {
    */
   async generateQueryEmbedding(query: string): Promise<number[]> {
     return this.performanceTracker.track(
-      `generateQueryEmbedding[${query.substring(0, 30)}...]`,
+      'generateQueryEmbedding',
       async () => {
         // Check cache first
         const cached = this.cacheService.get(query);
         if (cached) {
           this.logger.debug(
-            `Embedding cache hit for query: ${query.substring(0, 50)}...`,
+            `Embedding cache hit for query (length: ${query.length})`,
           );
           return cached;
         }

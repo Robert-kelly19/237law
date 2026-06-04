@@ -16,9 +16,14 @@ export class EmbeddingCacheService {
   private cache: Map<string, CacheEntry> = new Map();
   private readonly maxSize = 200; // LRU limit
   private readonly ttl = 24 * 60 * 60 * 1000; // 24 hours
+  private cleanupIntervalId: NodeJS.Timeout | null = null;
 
   constructor() {
     this.startCleanupInterval();
+  }
+
+  onModuleDestroy(): void {
+    this.stopCleanupInterval();
   }
 
   /**
@@ -42,7 +47,8 @@ export class EmbeddingCacheService {
     entry.hits++;
     entry.timestamp = Date.now();
 
-    return entry.embedding;
+    // Return defensive copy to prevent mutation of cached state
+    return Array.from(entry.embedding);
   }
 
   /**
@@ -62,8 +68,9 @@ export class EmbeddingCacheService {
       this.cache.delete(lruKey);
     }
 
+    // Store defensive copy to prevent external mutations
     this.cache.set(hash, {
-      embedding,
+      embedding: Array.from(embedding),
       timestamp: Date.now(),
       hits: 0,
     });
@@ -99,7 +106,7 @@ export class EmbeddingCacheService {
    * Periodically clean expired entries
    */
   private startCleanupInterval(): void {
-    setInterval(() => {
+    this.cleanupIntervalId = setInterval(() => {
       let cleaned = 0;
       const now = Date.now();
 
@@ -116,5 +123,15 @@ export class EmbeddingCacheService {
         );
       }
     }, 60 * 60 * 1000); // Run every hour
+  }
+
+  /**
+   * Stop and clear the cleanup interval
+   */
+  private stopCleanupInterval(): void {
+    if (this.cleanupIntervalId) {
+      clearInterval(this.cleanupIntervalId);
+      this.cleanupIntervalId = null;
+    }
   }
 }

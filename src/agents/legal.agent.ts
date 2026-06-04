@@ -86,7 +86,7 @@ export class LegalAgentService {
 
       try {
         this.logger.debug(
-          `Processing query for user ${query.userId}: ${query.query}`,
+          `Processing query for user ${query.userId} (length: ${query.query.length})`,
         );
 
         // STEP 1: Lightweight intent analysis (NO taxonomy)
@@ -105,20 +105,16 @@ export class LegalAgentService {
 
         // STEP 2 & 3: PARALLELIZE session, context, and embedding generation
         // These operations are independent and can run in parallel
-        const [sessionId, context, topicEmbedding] = await Promise.all([
-          this.performanceTracker.track('getOrCreateSession', () =>
-            query.sessionId
-              ? Promise.resolve(query.sessionId)
-              : this.conversationService.getOrCreateSession(query.userId),
+        const sessionId = await this.performanceTracker.track('getOrCreateSession', () =>
+          query.sessionId
+            ? Promise.resolve(query.sessionId)
+            : this.conversationService.getOrCreateSession(query.userId),
+        );
+        
+        const [context] = await Promise.all([
+          this.performanceTracker.track('buildContextSummary', async () =>
+            this.contextTool.buildContextSummary(query.userId, sessionId),
           ),
-          this.performanceTracker.track('buildContextSummary', async () => {
-            // Note: context building needs sessionId, but we can start this immediately
-            // since Promise.all allows dependent operations
-            const sid = query.sessionId
-              ? query.sessionId
-              : await this.conversationService.getOrCreateSession(query.userId);
-            return this.contextTool.buildContextSummary(query.userId, sid);
-          }),
           this.performanceTracker.track('generateQueryEmbedding', () =>
             this.embeddingService.generateQueryEmbedding(query.query),
           ),

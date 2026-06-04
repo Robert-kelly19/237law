@@ -33,7 +33,7 @@ export class LawSearchTool {
    */
   async searchByKeyword(query: string, limit: number = 5): Promise<ToolResult> {
     return this.performanceTracker.track(
-      `searchByKeyword[${query.substring(0, 20)}...]`,
+      'searchByKeyword',
       async () => {
         try {
           this.logger.debug(
@@ -81,7 +81,7 @@ export class LawSearchTool {
    */
   async searchByTopic(topic: string, limit: number = 5): Promise<ToolResult> {
     return this.performanceTracker.track(
-      `searchByTopic_vector[${topic.substring(0, 20)}...]`,
+      'searchByTopic',
       async () => {
         try {
           this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);

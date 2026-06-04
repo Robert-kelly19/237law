@@ -16,9 +16,14 @@ export class LLMResponseCacheService {
   private cache: Map<string, LLMCacheEntry> = new Map();
   private readonly maxSize = 100; // LRU limit for LLM responses
   private readonly ttl = 12 * 60 * 60 * 1000; // 12 hours
+  private cleanupIntervalId: NodeJS.Timeout | null = null;
 
   constructor() {
     this.startCleanupInterval();
+  }
+
+  onModuleDestroy(): void {
+    this.stopCleanupInterval();
   }
 
   /**
@@ -69,7 +74,9 @@ export class LLMResponseCacheService {
    * Generate cache key from query context
    */
   generateKey(query: string, toolsUsed: string[]): string {
-    const key = `${query}|${toolsUsed.sort().join(',')}`;
+    // Use a copy to avoid mutating the caller's array
+    const sortedTools = [...toolsUsed].sort().join(',');
+    const key = `${query}|${sortedTools}`;
     return Buffer.from(key).toString('base64');
   }
 
@@ -95,7 +102,7 @@ export class LLMResponseCacheService {
    * Periodically clean expired entries
    */
   private startCleanupInterval(): void {
-    setInterval(() => {
+    this.cleanupIntervalId = setInterval(() => {
       let cleaned = 0;
       const now = Date.now();
 
@@ -112,5 +119,15 @@ export class LLMResponseCacheService {
         );
       }
     }, 60 * 60 * 1000); // Run every hour
+  }
+
+  /**
+   * Stop and clear the cleanup interval
+   */
+  private stopCleanupInterval(): void {
+    if (this.cleanupIntervalId) {
+      clearInterval(this.cleanupIntervalId);
+      this.cleanupIntervalId = null;
+    }
   }
 }

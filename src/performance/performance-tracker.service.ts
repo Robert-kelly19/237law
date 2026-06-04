@@ -16,27 +16,31 @@ export class PerformanceTrackerService {
   private timers: Map<string, number> = new Map();
   private metrics: TimingMetric[] = [];
   private readonly maxMetricsHistory = 1000;
+  private tokenCounter = 0;
 
   /**
-   * Start timing a step
+   * Start timing a step and return a unique token
    */
-  start(label: string): void {
-    this.timers.set(label, Date.now());
+  start(label: string): string {
+    const token = `${label}:${++this.tokenCounter}`;
+    this.timers.set(token, Date.now());
+    return token;
   }
 
   /**
    * End timing and log duration
    */
-  end(label: string): number {
-    const startTime = this.timers.get(label);
+  end(token: string): number {
+    const startTime = this.timers.get(token);
     if (!startTime) {
-      this.logger.warn(`Timer "${label}" was never started`);
+      this.logger.warn(`Timer "${token}" was never started`);
       return 0;
     }
 
     const duration = Date.now() - startTime;
-    this.timers.delete(label);
+    this.timers.delete(token);
 
+    const [label] = token.split(':');
     const metric: TimingMetric = {
       step: label,
       duration,
@@ -64,13 +68,13 @@ export class PerformanceTrackerService {
    * Mark and auto-time an async operation
    */
   async track<T>(label: string, fn: () => Promise<T>): Promise<T> {
-    this.start(label);
+    const token = this.start(label);
     try {
       const result = await fn();
-      this.end(label);
+      this.end(token);
       return result;
     } catch (error) {
-      this.end(label);
+      this.end(token);
       throw error;
     }
   }
@@ -79,13 +83,13 @@ export class PerformanceTrackerService {
    * Mark and auto-time a synchronous operation
    */
   trackSync<T>(label: string, fn: () => T): T {
-    this.start(label);
+    const token = this.start(label);
     try {
       const result = fn();
-      this.end(label);
+      this.end(token);
       return result;
     } catch (error) {
-      this.end(label);
+      this.end(token);
       throw error;
     }
   }

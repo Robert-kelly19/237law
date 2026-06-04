@@ -1,25 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as https from 'https';
-import * as http from 'http';
 import { PerformanceTrackerService } from '../performance/performance-tracker.service';
-
-// Reuse HTTP agent for connection pooling
-const httpsAgent = new https.Agent({
-  keepAlive: true,
-  keepAliveMsecs: 30000,
-  maxSockets: 50,
-  maxFreeSockets: 10,
-  timeout: 60000,
-});
-
-const httpAgent = new http.Agent({
-  keepAlive: true,
-  keepAliveMsecs: 30000,
-  maxSockets: 50,
-  maxFreeSockets: 10,
-  timeout: 60000,
-});
 
 @Injectable()
 export class WhatsappService {
@@ -32,7 +13,7 @@ export class WhatsappService {
 
   async send(to: string, message: string): Promise<void> {
     return this.performanceTracker.track(
-      `whatsapp_send[${to.substring(0, 10)}...]`,
+      'whatsapp_send',
       async () => {
         const token = this.configService.get<string>('WHATSAPP_ACCESS_TOKEN');
         const phoneNumberId = this.configService.get<string>(
@@ -55,6 +36,9 @@ export class WhatsappService {
         };
 
         try {
+          const abortController = new AbortController();
+          const timeoutId = setTimeout(() => abortController.abort(), 5000);
+
           const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -62,10 +46,10 @@ export class WhatsappService {
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify(payload),
-            // @ts-ignore - node-fetch uses agents for connection pooling
-            agent: httpsAgent,
-            timeout: 5000, // 5 second timeout
+            signal: abortController.signal,
           });
+
+          clearTimeout(timeoutId);
 
           if (!response.ok) {
             const errorText = await response.text();
@@ -75,7 +59,7 @@ export class WhatsappService {
           }
 
           const data = await response.json();
-          this.logger.log(`Message sent: ${JSON.stringify(data)}`);
+          this.logger.log(`Message sent successfully`);
         } catch (error) {
           this.logger.error('Error sending WhatsApp message', error);
           throw error;
