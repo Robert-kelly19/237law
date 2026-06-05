@@ -7,6 +7,8 @@ import { ConversationService } from '../memory/conversation.service';
 import { PerformanceTrackerService } from '../performance/performance-tracker.service';
 import { LLMResponseCacheService } from '../cache/llm-response-cache.service';
 import { EmbeddingService } from '../embedding.service';
+import { LanguageDetectionService } from '../common/language-detection.service';
+import { GreetingsService } from '../common/greetings.service';
 import OpenAI from 'openai';
 
 /**
@@ -67,6 +69,8 @@ export class LegalAgentService {
     private performanceTracker: PerformanceTrackerService,
     private llmCacheService: LLMResponseCacheService,
     private embeddingService: EmbeddingService,
+    private languageDetection: LanguageDetectionService,
+    private greetingsService: GreetingsService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -88,6 +92,37 @@ export class LegalAgentService {
         this.logger.debug(
           `Processing query for (length: ${query.query.length})`,
         );
+
+        // STEP 0: Detect language and check for greetings
+        const detectedLanguage = this.languageDetection.detect(query.query);
+        this.logger.debug(`Detected language: ${detectedLanguage}`);
+
+        if (this.languageDetection.isGreeting(query.query)) {
+          const greeting = this.greetingsService.getGreeting(
+            this.languageDetection.detectGreetingLanguage(query.query),
+            query.userId,
+          );
+          this.logger.debug(`Greeting detected, returning: ${greeting}`);
+
+          return {
+            answer: greeting,
+            citations: [],
+            reasoning: {
+              confidence: 1.0,
+              toolsUsed: ['greeting_detector'],
+              steps: [
+                {
+                  step: 1,
+                  action: 'detect_greeting',
+                  input: query.query,
+                  output: { isGreeting: true, language: detectedLanguage },
+                  confidence: 1.0,
+                },
+              ],
+            },
+            relatedArticles: [],
+          };
+        }
 
         // STEP 1: Lightweight intent analysis (NO taxonomy)
         const analysis = this.performanceTracker.trackSync(
@@ -158,7 +193,7 @@ export class LegalAgentService {
         // STEP 6: RAG synthesis
         const synthesis = await this.performanceTracker.track(
           'synthesizeResults',
-          () => this.synthesizeResults(query.query, toolResults),
+          () => this.synthesizeResults(query.query, toolResults, detectedLanguage),
         );
 
         addReasoningStep({
@@ -200,6 +235,7 @@ export class LegalAgentService {
             content: {
               query: query.query,
               timestamp: new Date().toISOString(),
+              language: detectedLanguage,
             },
             importance: 3,
           }),
@@ -311,6 +347,7 @@ export class LegalAgentService {
   private async synthesizeResults(
     query: string,
     toolResults: ToolExecutionResult,
+    detectedLanguage?: string,
   ): Promise<{
     answer: string;
     citations: any[];
@@ -350,8 +387,14 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
             )
             .join('\n\n');
 
+          const languageInstructions = this.getLanguageInstructions(detectedLanguage);
+
           const prompt = `
 You are a professional legal assistant specializing exclusively in Cameroonian law. You help ordinary citizens, entrepreneurs, students, and professionals understand their legal rights and obligations under Cameroonian legislation.
+
+---
+
+${languageInstructions}
 
 ---
 
@@ -389,8 +432,7 @@ RESPONSE LOGIC — FOLLOW THIS DECISION TREE:
 ---
 
 LANGUAGE & TONE:
-- Use simple, everyday English (or French if the user writes in French).
-- Write short paragraphs — maximum 3 sentences each.
+- Use simple, everyday language. Write short paragraphs — maximum 3 sentences each.
 - Avoid legal jargon. If a legal term must be used, define it immediately in plain language.
 - Be warm and reassuring — many users may be stressed or intimidated.
 
@@ -489,5 +531,43 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
     }
 
     return 'general legal inquiry';
+  }
+
+  /**
+   * Get language-specific instructions for the LLM
+   */
+  private getLanguageInstructions(language?: string): string {
+    switch (language) {
+      case 'french':
+        return `LANGUAGE INSTRUCTIONS:
+- Respond ONLY in French.
+- Use formal "vous" form unless the user used informal "tu" form.
+- Keep sentences simple and clear for non-lawyers.`;
+
+      case 'pidgin':
+        return `LANGUAGE INSTRUCTIONS:
+- Respond in Nigerian/Cameroonian Pidgin English.
+- Use colloquial but respectful tone.
+- Mix English and Pidgin naturally (code-switching is fine).
+- Keep it friendly and accessible.`;
+
+      case 'spanish':
+        return `LANGUAGE INSTRUCTIONS:
+- Respond ONLY in Spanish.
+- Use neutral Spanish that works across Spanish-speaking regions.
+- Keep sentences simple and clear for non-lawyers.`;
+
+      case 'portuguese':
+        return `LANGUAGE INSTRUCTIONS:
+- Respond ONLY in Portuguese.
+- Use neutral Portuguese that works across Portuguese-speaking regions.
+- Keep sentences simple and clear for non-lawyers.`;
+
+      default:
+        return `LANGUAGE INSTRUCTIONS:
+- Respond in clear, simple English.
+- Use everyday language that non-lawyers can understand.
+- Keep sentences short and direct.`;
+    }
   }
 }

@@ -18,12 +18,14 @@ import { ContextTool } from './agents/tools/context.tool';
 import { EmbeddingCacheService } from './cache/embedding-cache.service';
 import { LLMResponseCacheService } from './cache/llm-response-cache.service';
 import { PerformanceTrackerService } from './performance/performance-tracker.service';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    CommonModule,
   ],
   controllers: [AppController, RagController, WhatsappController],
   providers: [
