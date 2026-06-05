@@ -4,8 +4,6 @@ export type DetectedLanguage =
   | 'english'
   | 'french'
   | 'pidgin'
-  | 'spanish'
-  | 'portuguese'
   | 'unknown';
 
 @Injectable()
@@ -19,8 +17,6 @@ export class LanguageDetectionService {
     english: /\b(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
     french: /\b(bonjour|bonsoir|salut|ça\s+va|allô|coucou|hé)\b/i,
     pidgin: /\b(howdy|wey\s+dey|hello|hey|alright|how\s+body|washer|how\s+na|wha\s+\w+|abi|innit)\b/i,
-    spanish: /\b(hola|buenos\s+(días|noches|tardes)|qué\s+tal|ey|hey|holi|oye)\b/i,
-    portuguese: /\b(olá|oi|bom\s+(dia|noite|tarde)|como\s+vai|tudo\s+bem|opa)\b/i,
     unknown: /(?!)/,
   };
 
@@ -31,7 +27,6 @@ export class LanguageDetectionService {
     english: /\b(the|is|are|have|has|do|does|what|how|where|when|why|can|will|would|should|could|please|thanks|thank|you|me|i)\b/i,
     french: /\b(le|la|les|un|une|des|et|est|sont|je|tu|il|elle|nous|vous|ils|elles|qui|que|quoi|où|quand|pourquoi|comment|s\'il\s+vous\s+plaît|merci|oui|non)\b/i,
     pidgin: /\b(dey|wey|no\s+be|abi|eh|innit|masa|sef|o|o\s+lord|aunty|bro|fam|bruv|mandem|wallahi|alhamdulillah|walloh)\b/i,
-   
     unknown: /(?!)/,
   };
 
@@ -45,8 +40,6 @@ export class LanguageDetectionService {
       english: 0,
       french: 0,
       pidgin: 0,
-      spanish: 0,
-      portuguese: 0,
       unknown: 0,
     };
 
@@ -103,8 +96,6 @@ export class LanguageDetectionService {
     // Check specific greeting patterns
     if (this.greetingPatterns.french.test(normalizedText)) return 'french';
     if (this.greetingPatterns.pidgin.test(normalizedText)) return 'pidgin';
-    if (this.greetingPatterns.spanish.test(normalizedText)) return 'spanish';
-    if (this.greetingPatterns.portuguese.test(normalizedText)) return 'portuguese';
     if (this.greetingPatterns.english.test(normalizedText)) return 'english';
 
     return this.detect(text);
