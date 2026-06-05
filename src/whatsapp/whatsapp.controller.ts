@@ -71,7 +71,7 @@ export class WhatsappController implements OnModuleDestroy {
   /**
    * Interval to cleanup old message entries (every minute)
    */
-  private cleanupInterval: NodeJS.Timer | null = null;
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(
     private whatsappService: WhatsappService,
