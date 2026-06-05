@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
@@ -53,13 +54,32 @@ interface WebhookText {
 }
 
 @Controller('whatsapp')
-export class WhatsappController {
+export class WhatsappController implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsappController.name);
+  
+  /**
+   * Track processed message IDs to prevent duplicate webhook processing
+   * Key: WhatsApp message ID, Value: timestamp when processed
+   */
+  private readonly processedMessages = new Map<string, number>();
+  
+  /**
+   * Time-to-live for message deduplication (5 minutes)
+   */
+  private readonly MESSAGE_TTL = 300000;
+  
+  /**
+   * Interval to cleanup old message entries (every minute)
+   */
+  private cleanupInterval: NodeJS.Timer | null = null;
 
   constructor(
     private whatsappService: WhatsappService,
     private legalAgent: LegalAgentService,
-  ) {}
+  ) {
+    // Start background cleanup task
+    this.startCleanupTask();
+  }
 
   @Get('webhook')
   verifyWebhook(
@@ -95,10 +115,22 @@ export class WhatsappController {
         if (!change?.value?.messages) continue;
 
         for (const message of change.value.messages) {
+          const messageId = message.id;
           const from = message.from;
           const text = message.text?.body;
 
           if (!from || !text) continue;
+
+          // Check if this message has already been processed (idempotency)
+          if (this.isMessageProcessed(messageId)) {
+            this.logger.warn(
+              `Duplicate webhook detected for message ${messageId}, skipping`,
+            );
+            continue;
+          }
+
+          // Mark message as processed before processing to prevent race conditions
+          this.markMessageAsProcessed(messageId);
 
           try {
             // Use the agent with memory (sessions managed by agent via ConversationService)
@@ -133,4 +165,67 @@ export class WhatsappController {
 
     return { status: 'EVENT_RECEIVED' };
   }
+
+  /**
+   * Check if a message has already been processed
+   */
+  private isMessageProcessed(messageId: string | undefined): boolean {
+    if (!messageId) return false;
+    return this.processedMessages.has(messageId);
+  }
+
+  /**
+   * Mark a message as processed with current timestamp
+   */
+  private markMessageAsProcessed(messageId: string | undefined): void {
+    if (messageId) {
+      this.processedMessages.set(messageId, Date.now());
+    }
+  }
+
+  /**
+   * Start background cleanup task to remove old message entries
+   */
+  private startCleanupTask(): void {
+    // Run cleanup every 60 seconds
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOldMessages();
+    }, 60000);
+
+    // Ensure interval doesn't prevent process exit
+    if (this.cleanupInterval.unref) {
+      this.cleanupInterval.unref();
+    }
+  }
+
+  /**
+   * Remove message IDs older than MESSAGE_TTL from the processed messages map
+   */
+  private cleanupOldMessages(): void {
+    const now = Date.now();
+    let removedCount = 0;
+
+    for (const [messageId, timestamp] of this.processedMessages.entries()) {
+      if (now - timestamp > this.MESSAGE_TTL) {
+        this.processedMessages.delete(messageId);
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      this.logger.debug(
+        `Cleaned up ${removedCount} old messages. Map size: ${this.processedMessages.size}`,
+      );
+    }
+  }
+
+  /**
+   * Cleanup task on controller destruction
+   */
+  onModuleDestroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+  }
 }
+
