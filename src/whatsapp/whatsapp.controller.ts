@@ -121,6 +121,13 @@ export class WhatsappController implements OnModuleDestroy {
 
           if (!from || !text) continue;
 
+          if (!messageId) {
+            this.logger.warn(
+              `Skipping message from ${from} with text "${text?.substring(0, 50)}": missing message.id`,
+            );
+            continue;
+          }
+
           // Check if this message has already been processed (idempotency)
           if (this.isMessageProcessed(messageId)) {
             this.logger.warn(

@@ -50,7 +50,7 @@ export class LanguageDetectionService {
     }
 
     // Find language with highest score
-    let detectedLanguage: DetectedLanguage = 'english'; // Default to English
+    let detectedLanguage: DetectedLanguage = 'unknown';
     let maxScore = 0;
 
     for (const [lang, score] of Object.entries(scores)) {
@@ -87,17 +87,32 @@ export class LanguageDetectionService {
    * Detect greeting language specifically
    */
   detectGreetingLanguage(text: string): DetectedLanguage {
-    if (!this.isGreeting(text)) {
-      return this.detect(text);
+    if (!text || text.trim().length === 0) {
+      return 'unknown';
     }
 
     const normalizedText = text.toLowerCase();
+    const scores: Record<DetectedLanguage, number> = { english: 0, french: 0, pidgin: 0, unknown: 0 };
 
-    // Check specific greeting patterns
-    if (this.greetingPatterns.french.test(normalizedText)) return 'french';
-    if (this.greetingPatterns.pidgin.test(normalizedText)) return 'pidgin';
-    if (this.greetingPatterns.english.test(normalizedText)) return 'english';
+    for (const [lang, pattern] of Object.entries(this.greetingPatterns)) {
+      const matches = (normalizedText.match(pattern) || []).length;
+      scores[lang as DetectedLanguage] = matches;
+    }
 
-    return this.detect(text);
+    let detectedLanguage: DetectedLanguage = 'unknown';
+    let maxScore = 0;
+
+    for (const [lang, score] of Object.entries(scores)) {
+      if (score > maxScore) {
+        maxScore = score;
+        detectedLanguage = lang as DetectedLanguage;
+      }
+    }
+
+    if (maxScore === 0) {
+      return this.detect(text);
+    }
+
+    return detectedLanguage;
   }
 }

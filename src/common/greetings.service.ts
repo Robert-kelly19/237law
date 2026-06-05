@@ -96,7 +96,28 @@ export class GreetingsService {
   /**
    * Track greeting usage per user to ensure variety
    */
-  private userGreetingHistory: Map<string, Set<number>> = new Map();
+  private readonly HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
+
+  private userGreetingHistory: Map<string, { history: Set<number>; lastUsed: number }> = new Map();
+
+  constructor() {
+    this.startCleanupTask();
+  }
+
+  private startCleanupTask(): void {
+    setInterval(() => {
+      this.cleanupStaleHistory();
+    }, 60 * 60 * 1000);
+  }
+
+  private cleanupStaleHistory(): void {
+    const now = Date.now();
+    for (const [userId, entry] of this.userGreetingHistory.entries()) {
+      if (now - entry.lastUsed > this.HISTORY_TTL_MS) {
+        this.userGreetingHistory.delete(userId);
+      }
+    }
+  }
 
   /**
    * Get a random greeting for the detected language
@@ -114,30 +135,27 @@ export class GreetingsService {
 
     if (userId) {
       // Track history per user to avoid repetition
-      const history = this.userGreetingHistory.get(userId) || new Set();
+      const entry = this.userGreetingHistory.get(userId) || { history: new Set<number>(), lastUsed: 0 };
+      const history = entry.history;
       const availableIndices = Array.from({ length: greetings.length }, (_, i) => i).filter(
         (i) => !history.has(i),
       );
 
       if (availableIndices.length === 0) {
-        // Reset history when all greetings have been used
         history.clear();
-        this.userGreetingHistory.set(userId, history);
       }
 
-      // Pick from available indices
       const validIndices = availableIndices.length > 0 ? availableIndices : Array.from({ length: greetings.length }, (_, i) => i);
       selectedIndex = validIndices[Math.floor(Math.random() * validIndices.length)];
 
-      // Update history
       history.add(selectedIndex);
       if (history.size > Math.ceil(greetings.length / 2)) {
-        // Keep only recent half of history to allow some repetition after variety
         const historyArray = Array.from(history);
         history.clear();
         historyArray.slice(-Math.ceil(greetings.length / 2)).forEach((i) => history.add(i));
       }
-      this.userGreetingHistory.set(userId, history);
+
+      this.userGreetingHistory.set(userId, { history, lastUsed: Date.now() });
     } else {
       // Random selection without tracking
       selectedIndex = Math.floor(Math.random() * greetings.length);

@@ -98,8 +98,9 @@ export class LegalAgentService {
         this.logger.debug(`Detected language: ${detectedLanguage}`);
 
         if (this.languageDetection.isGreeting(query.query)) {
+          const detectedGreetingLanguage = this.languageDetection.detectGreetingLanguage(query.query);
           const greeting = this.greetingsService.getGreeting(
-            this.languageDetection.detectGreetingLanguage(query.query),
+            detectedGreetingLanguage,
             query.userId,
           );
           this.logger.debug(`Greeting detected, returning: ${greeting}`);
@@ -115,7 +116,7 @@ export class LegalAgentService {
                   step: 1,
                   action: 'detect_greeting',
                   input: query.query,
-                  output: { isGreeting: true, language: detectedLanguage },
+                  output: { isGreeting: true, language: detectedGreetingLanguage },
                   confidence: 1.0,
                 },
               ],
