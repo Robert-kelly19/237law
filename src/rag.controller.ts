@@ -76,4 +76,39 @@ export class RagController {
       throw error;
     }
   }
+
+  /**
+   * Manual trigger to re-ingest all PDFs (for testing/debugging)
+   */
+  @Post('reingest-all')
+  async reingestAll() {
+    this.logger.log('Manual re-ingestion triggered');
+    const result = await this.ragService.ingestPdfs();
+    return {
+      success: true,
+      ingested: result.ingested,
+      skipped: result.skipped,
+    };
+  }
+
+  /**
+   * Check database ingestion status
+   */
+  @Get('ingest-status')
+  async getIngestionStatus() {
+    const count = await this.ragService.prisma.lawSection.count();
+    const laws = await this.ragService.prisma.lawSection.groupBy({
+      by: ['source'],
+      _count: { id: true },
+    });
+    
+    return {
+      totalChunks: count,
+      lawsBySource: laws.map(l => ({
+        source: l.source,
+        chunks: l._count.id,
+      })),
+      isEmpty: count === 0,
+    };
+  }
 }

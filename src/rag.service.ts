@@ -21,7 +21,7 @@ export class RagService implements OnModuleInit {
   private readonly logger = new Logger(RagService.name);
 
   constructor(
-    private prisma: PrismaService,
+    public prisma: PrismaService,
     private embeddingService: EmbeddingService,
     private pdfService: PdfService,
   ) {
@@ -31,59 +31,95 @@ export class RagService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    await this.ingestPdfs();
+    try {
+      await this.ingestPdfs();
+    } catch (error) {
+      this.logger.error('Fatal error during PDF ingestion:', error);
+    }
   }
 
   async ingestPdfs(): Promise<{ ingested: string[]; skipped: string[] }> {
+    this.logger.log('[RagService] PDF INGESTION STARTED');
+    
     const pdfData = await this.pdfService.extractTextsFromPdfs();
+    this.logger.log(`[RagService] Extracted ${pdfData.length} PDFs`);
+    
     const ingested: string[] = [];
     const skipped: string[] = [];
 
     for (const { source, text } of pdfData) {
+      this.logger.log(`\n[RagService] Processing source: ${source}`);
+      
       const exists = await this.isSourceIngested(source);
       if (exists) {
+        this.logger.warn(`[RagService] Source already ingested, skipping: ${source}`);
         skipped.push(source);
         continue;
       }
 
       const rawChunks = this.pdfService.chunkText(text);
+      this.logger.log(`[RagService] Created ${rawChunks.length} chunks from ${source}`);
 
-      const validChunks = rawChunks
-        .map((chunk, index) => ({ chunk, index }))
-        .filter(
-          ({ chunk }) =>
-            this.embeddingService.getChunkValidationReason(chunk) === null,
-        );
+      // Filter out invalid chunks BEFORE sending to embedding service
+      const textsToEmbed = rawChunks.filter(chunk => {
+        if (!chunk || chunk.trim().length === 0) {
+          this.logger.debug(`[RagService] Skipping empty chunk`);
+          return false;
+        }
+        // Ensure minimum word count - lowered from 5 to 3 to preserve headers
+        const wordCount = chunk.trim().split(/\s+/).length;
+        if (wordCount < 1) {
+          this.logger.debug(`[RagService] Skipping chunk with too few words (${wordCount})`);
+          return false;
+        }
+        return true;
+      });
 
-      if (!validChunks.length) continue;
+      this.logger.log(`[RagService] ${textsToEmbed.length} valid chunks ready for embedding (filtered from ${rawChunks.length})`);
 
-      const texts = validChunks.map((c) => c.chunk);
-      const embeddings = await this.embeddingService.generateEmbeddings(texts);
+      if (!textsToEmbed.length) {
+        this.logger.error(`[RagService] NO VALID CHUNKS for ${source}`);
+        continue;
+      }
 
+      // Generate embeddings
       try {
+        this.logger.log(`[RagService] Generating embeddings for ${textsToEmbed.length} chunks...`);
+        const embeddings = await this.embeddingService.generateEmbeddings(textsToEmbed);
+        this.logger.log(`[RagService] Generated ${embeddings.length} embeddings`);
+
+        // Store in database
+        let insertCount = 0;
         await this.prisma.$transaction(async (tx) => {
-          for (let i = 0; i < texts.length; i++) {
+          for (let i = 0; i < textsToEmbed.length; i++) {
             const { lawName, articleNumber } = this.pdfService.extractMetadata(
-              texts[i],
+              textsToEmbed[i],
               source,
-              validChunks[i].index,
+              i,
             );
 
-            const contentHash = this.computeContentHash(texts[i]);
+            const contentHash = this.computeContentHash(textsToEmbed[i]);
             const vector = this.vectorToLiteral(embeddings[i]);
 
             await tx.$executeRaw`
               INSERT INTO law_sections ("lawName","articleNumber",content,source,content_hash,embedding)
-              VALUES (${lawName},${articleNumber},${texts[i]},${source},${contentHash},${vector}::vector(1536))
+              VALUES (${lawName},${articleNumber},${textsToEmbed[i]},${source},${contentHash},${vector}::vector(1536))
             `;
+            insertCount++;
           }
         });
+
+        this.logger.log(`[RagService] Successfully inserted ${insertCount} chunks from ${source}`);
         ingested.push(source);
-      } catch (error) {
-        this.logger.error(`Failed to ingest source ${source}:`, error);
-        continue;
+      } catch (error: any) {
+        this.logger.error(`[RagService]  Failed to ingest source ${source}:`, error);
+        this.logger.error(`Error details: ${error.message}`);
       }
     }
+
+    this.logger.log(`\n[RagService] INGESTION COMPLETE `);
+    this.logger.log(`[RagService] Ingested: ${ingested.join(', ')}`);
+    this.logger.log(`[RagService] Skipped: ${skipped.join(', ')}`);
 
     return { ingested, skipped };
   }

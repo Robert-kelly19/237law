@@ -1,23 +1,25 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PDFParse } from 'pdf-parse';
 
 @Injectable()
 export class PdfService {
+  private readonly logger = new Logger(PdfService.name);
+
   /**
    * Reads all PDF files from /pdfs and extracts text safely
    */
   async extractTextsFromPdfs(): Promise<{ source: string; text: string }[]> {
     const pdfsDir = path.join(process.cwd(), 'pdfs');
 
-    // Prevent crash if folder doesn't exist
     if (!fs.existsSync(pdfsDir)) {
-      console.warn('[PdfService] /pdfs folder not found. Skipping ingestion.');
+      this.logger.warn('[PdfService] /pdfs folder not found. Skipping ingestion.');
       return [];
     }
 
     const files = fs.readdirSync(pdfsDir).filter((f) => f.endsWith('.pdf'));
+    this.logger.log(`[PdfService] Found ${files.length} PDF files to process`);
 
     const results: { source: string; text: string }[] = [];
 
@@ -25,6 +27,7 @@ export class PdfService {
       const filePath = path.join(pdfsDir, file);
 
       try {
+        this.logger.log(`[PdfService] Processing: ${file}`);
         const dataBuffer = fs.readFileSync(filePath);
 
         const parser = new PDFParse({ data: dataBuffer });
@@ -32,13 +35,14 @@ export class PdfService {
         await parser.destroy();
 
         const cleanedText = this.cleanText(data.text);
+        this.logger.log(`[PdfService] Extracted ${cleanedText.length} characters from ${file}`);
 
         results.push({
           source: file,
           text: cleanedText,
         });
       } catch (error) {
-        console.error(`[PdfService] Error parsing ${file}:`, error);
+        this.logger.error(`[PdfService] Error parsing ${file}:`, error);
       }
     }
 
@@ -46,56 +50,65 @@ export class PdfService {
   }
 
   /**
-   * Clean extracted PDF text
+   * Clean extracted PDF text (minimal cleaning - preserve structure)
    */
   private cleanText(text: string): string {
     return text
-      .replace(/\r/g, ' ')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/\r/g, '') 
+      .replace(/\n\n+/g, '\n') 
       .trim();
   }
 
   /**
-   * Improved chunking (sentence-aware, RAG-friendly)
+   * Smart chunking that preserves sections and articles
+   * Ensures headers are always included with content chunks
    */
-  chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
-    const sentences = this.splitIntoSentences(text);
-
+  chunkText(text: string, chunkSize = 500): string[] {
+    // Split by sections first
+    const sections = text.split(/(?=(?:SECTION|ARTICLE|CHAPTER)\s+\d+)/i);
+    
     const chunks: string[] = [];
-    let currentChunk: string[] = [];
-    let currentLength = 0;
 
-    for (const sentence of sentences) {
-      const sentenceLength = sentence.split(' ').length;
+    for (const section of sections) {
+      if (section.trim().length === 0) continue;
 
-      if (currentLength + sentenceLength > chunkSize) {
-        chunks.push(currentChunk.join(' '));
-
-        // overlap: keep last few sentences
-        currentChunk = currentChunk.slice(-Math.floor(overlap / 10));
-        currentLength = currentChunk.join(' ').split(' ').length;
+      // Extract header (first line)
+      const lines = section.split('\n');
+      const header = lines[0]?.trim() || '';
+      
+      // If section is small, keep header with content as one chunk
+      if (section.length <= chunkSize * 1.2) {
+        chunks.push(section.trim());
+        continue;
       }
 
-      currentChunk.push(sentence);
-      currentLength += sentenceLength;
+      // For large sections: ensure header is prepended to each chunk
+      const sentences = section.split(/(?<=[.!?])\s+/).filter(Boolean);
+      let currentChunk: string[] = header ? [header] : [];
+      let currentLength = header.split(/\s+/).length;
+
+      for (const sentence of sentences) {
+        const sentenceLength = sentence.split(/\s+/).length;
+        
+
+        if (currentLength + sentenceLength > chunkSize && currentChunk.length > 1) {
+          chunks.push(currentChunk.join(' ').trim());
+          // Reset with header for next chunk
+          currentChunk = header ? [header] : [];
+          currentLength = header.split(/\s+/).length;
+        }
+        
+        currentChunk.push(sentence);
+        currentLength += sentenceLength;
+      }
+
+      // Push final chunk if it has content beyond just the header
+      if (currentChunk.length > 1 || (currentChunk.length === 1 && !header)) {
+        chunks.push(currentChunk.join(' ').trim());
+      }
     }
 
-    if (currentChunk.length > 0) {
-      chunks.push(currentChunk.join(' '));
-    }
-
-    return chunks;
-  }
-
-  /**
-   * Sentence splitter (simple but effective)
-   */
-  private splitIntoSentences(text: string): string[] {
-    return text
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    return chunks.filter(c => c.length > 0);
   }
 
   /**
@@ -108,9 +121,11 @@ export class PdfService {
   ): { lawName: string; articleNumber: string } {
     const lawName = path.parse(source).name;
 
+    // More aggressive section/article matching
     const articleMatch =
-      text.match(/Article\s+(\d+|[IVXLCDM]+)/i) ||
-      text.match(/Section\s+(\d+)/i);
+      text.match(/(?:SECTION|Article)\s+(\d+)/i) ||
+      text.match(/(?:PART|Chapter)\s+([IVXLCDM]+)/i) ||
+      text.match(/(?:SECTION|Article)\s+([A-Z])/i);
 
     return {
       lawName,

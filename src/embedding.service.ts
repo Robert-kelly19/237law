@@ -46,25 +46,15 @@ export class EmbeddingService {
   /**
    * Generates embeddings for a list of texts using OpenAI text-embedding-3-small.
    * Batches requests to handle large numbers of texts.
+   * NOTE: No filtering is done here - caller is responsible for input validation
    */
   async generateEmbeddings(texts: string[]): Promise<number[][]> {
     return this.performanceTracker.track('generateEmbeddings', async () => {
       const batchSize = 100; // OpenAI allows up to 2048 inputs per request, but batch for safety
       const embeddings: number[][] = [];
 
-      const normalizedTexts = texts.filter((text, index) => {
-        const reason = this.getChunkValidationReason(text);
-        if (reason !== null) {
-          console.warn(
-            `[EmbeddingService] Skipping invalid batch input at index ${index}: ${reason}`,
-          );
-          return false;
-        }
-        return true;
-      });
-
-      for (let i = 0; i < normalizedTexts.length; i += batchSize) {
-        const batch = normalizedTexts.slice(i, i + batchSize);
+      for (let i = 0; i < texts.length; i += batchSize) {
+        const batch = texts.slice(i, i + batchSize);
         if (batch.length === 0) {
           continue;
         }
