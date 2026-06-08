@@ -23,9 +23,9 @@ export class LanguageDetectionService {
    */
   private readonly languageIndicators: Record<DetectedLanguage, RegExp> = {
     english:
-      /\b(the|is|are|have|has|do|does|what|how|where|when|why|can|will|would|should|could|please|thanks|thank|you|me|i)\b/i,
+      /\b(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
     french:
-      /\b(le|la|les|un|une|des|et|est|sont|je|tu|il|elle|nous|vous|ils|elles|qui|que|quoi|où|quand|pourquoi|comment|s\'il\s+vous\s+plaît|merci|oui|non)\b/i,
+      /\b(le|la|les|un|une|des|et|est|sont|je|tu|il|elle|nous|vous|ils|elles|qui|que|quoi|où|quand|pourquoi|comment|s'il\s+vous\s+plaît|merci|oui|non)\b/i,
     pidgin:
       /\b(dey|wey|no\s+be|abi|eh|innit|masa|sef|o|o\s+lord|aunty|bro|fam|bruv|mandem|wallahi|alhamdulillah|walloh)\b/i,
     unknown: /(?!)/,

@@ -56,7 +56,6 @@ export class WhatsappService {
           );
         }
 
-        const data = await response.json();
         this.logger.log(`Message sent successfully`);
       } catch (error) {
         this.logger.error('Error sending WhatsApp message', error);
