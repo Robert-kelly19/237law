@@ -58,12 +58,9 @@ export class EmbeddingCacheService {
     const hash = this.hashQuery(query);
 
     // Evict LRU entry if cache is full
-    if (
-      this.cache.size >= this.maxSize &&
-      !this.cache.has(hash)
-    ) {
-      const lruKey = Array.from(this.cache.entries()).reduce((min, [key, entry]) =>
-        entry.hits < min[1].hits ? [key, entry] : min,
+    if (this.cache.size >= this.maxSize && !this.cache.has(hash)) {
+      const lruKey = Array.from(this.cache.entries()).reduce(
+        (min, [key, entry]) => (entry.hits < min[1].hits ? [key, entry] : min),
       )[0];
       this.cache.delete(lruKey);
     }
@@ -106,23 +103,26 @@ export class EmbeddingCacheService {
    * Periodically clean expired entries
    */
   private startCleanupInterval(): void {
-    this.cleanupIntervalId = setInterval(() => {
-      let cleaned = 0;
-      const now = Date.now();
+    this.cleanupIntervalId = setInterval(
+      () => {
+        let cleaned = 0;
+        const now = Date.now();
 
-      for (const [key, entry] of this.cache.entries()) {
-        if (now - entry.timestamp > this.ttl) {
-          this.cache.delete(key);
-          cleaned++;
+        for (const [key, entry] of this.cache.entries()) {
+          if (now - entry.timestamp > this.ttl) {
+            this.cache.delete(key);
+            cleaned++;
+          }
         }
-      }
 
-      if (cleaned > 0) {
-        this.logger.debug(
-          `Embedding cache cleanup: removed ${cleaned} expired entries (${this.cache.size} remaining)`,
-        );
-      }
-    }, 60 * 60 * 1000); // Run every hour
+        if (cleaned > 0) {
+          this.logger.debug(
+            `Embedding cache cleanup: removed ${cleaned} expired entries (${this.cache.size} remaining)`,
+          );
+        }
+      },
+      60 * 60 * 1000,
+    ); // Run every hour
   }
 
   /**

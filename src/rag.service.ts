@@ -21,7 +21,7 @@ export class RagService implements OnModuleInit {
   private readonly logger = new Logger(RagService.name);
 
   constructor(
-    public prisma: PrismaService,
+    private prisma: PrismaService,
     private embeddingService: EmbeddingService,
     private pdfService: PdfService,
   ) {
@@ -38,44 +38,57 @@ export class RagService implements OnModuleInit {
     }
   }
 
-  async ingestPdfs(): Promise<{ ingested: string[]; skipped: string[] }> {
+  async ingestPdfs(): Promise<{
+    ingested: string[];
+    skipped: string[];
+    failed: string[];
+  }> {
     this.logger.log('[RagService] PDF INGESTION STARTED');
-    
+
     const pdfData = await this.pdfService.extractTextsFromPdfs();
     this.logger.log(`[RagService] Extracted ${pdfData.length} PDFs`);
-    
+
     const ingested: string[] = [];
     const skipped: string[] = [];
+    const failed: string[] = [];
 
     for (const { source, text } of pdfData) {
       this.logger.log(`\n[RagService] Processing source: ${source}`);
-      
+
       const exists = await this.isSourceIngested(source);
       if (exists) {
-        this.logger.warn(`[RagService] Source already ingested, skipping: ${source}`);
+        this.logger.warn(
+          `[RagService] Source already ingested, skipping: ${source}`,
+        );
         skipped.push(source);
         continue;
       }
 
       const rawChunks = this.pdfService.chunkText(text);
-      this.logger.log(`[RagService] Created ${rawChunks.length} chunks from ${source}`);
+      this.logger.log(
+        `[RagService] Created ${rawChunks.length} chunks from ${source}`,
+      );
 
       // Filter out invalid chunks BEFORE sending to embedding service
-      const textsToEmbed = rawChunks.filter(chunk => {
+      const textsToEmbed = rawChunks.filter((chunk) => {
         if (!chunk || chunk.trim().length === 0) {
           this.logger.debug(`[RagService] Skipping empty chunk`);
           return false;
         }
-        // Ensure minimum word count - lowered from 5 to 3 to preserve headers
+        // Ensure minimum word count - lowered from 5 to 3
         const wordCount = chunk.trim().split(/\s+/).length;
-        if (wordCount < 1) {
-          this.logger.debug(`[RagService] Skipping chunk with too few words (${wordCount})`);
+        if (wordCount < 3) {
+          this.logger.debug(
+            `[RagService] Skipping chunk with too few words (${wordCount})`,
+          );
           return false;
         }
         return true;
       });
 
-      this.logger.log(`[RagService] ${textsToEmbed.length} valid chunks ready for embedding (filtered from ${rawChunks.length})`);
+      this.logger.log(
+        `[RagService] ${textsToEmbed.length} valid chunks ready for embedding (filtered from ${rawChunks.length})`,
+      );
 
       if (!textsToEmbed.length) {
         this.logger.error(`[RagService] NO VALID CHUNKS for ${source}`);
@@ -84,9 +97,14 @@ export class RagService implements OnModuleInit {
 
       // Generate embeddings
       try {
-        this.logger.log(`[RagService] Generating embeddings for ${textsToEmbed.length} chunks...`);
-        const embeddings = await this.embeddingService.generateEmbeddings(textsToEmbed);
-        this.logger.log(`[RagService] Generated ${embeddings.length} embeddings`);
+        this.logger.log(
+          `[RagService] Generating embeddings for ${textsToEmbed.length} chunks...`,
+        );
+        const embeddings =
+          await this.embeddingService.generateEmbeddings(textsToEmbed);
+        this.logger.log(
+          `[RagService] Generated ${embeddings.length} embeddings`,
+        );
 
         // Store in database
         let insertCount = 0;
@@ -109,11 +127,17 @@ export class RagService implements OnModuleInit {
           }
         });
 
-        this.logger.log(`[RagService] Successfully inserted ${insertCount} chunks from ${source}`);
+        this.logger.log(
+          `[RagService] Successfully inserted ${insertCount} chunks from ${source}`,
+        );
         ingested.push(source);
       } catch (error: any) {
-        this.logger.error(`[RagService]  Failed to ingest source ${source}:`, error);
+        this.logger.error(
+          `[RagService]  Failed to ingest source ${source}:`,
+          error,
+        );
         this.logger.error(`Error details: ${error.message}`);
+        failed.push(source);
       }
     }
 
@@ -121,7 +145,7 @@ export class RagService implements OnModuleInit {
     this.logger.log(`[RagService] Ingested: ${ingested.join(', ')}`);
     this.logger.log(`[RagService] Skipped: ${skipped.join(', ')}`);
 
-    return { ingested, skipped };
+    return { ingested, skipped, failed };
   }
 
   private async isSourceIngested(source: string): Promise<boolean> {
@@ -129,6 +153,27 @@ export class RagService implements OnModuleInit {
       SELECT 1 FROM law_sections WHERE source = ${source} LIMIT 1
     `;
     return Array.isArray(rows) && rows.length > 0;
+  }
+
+  async getIngestionStatus(): Promise<{
+    totalChunks: number;
+    lawsBySource: { source: string; chunks: number }[];
+    isEmpty: boolean;
+  }> {
+    const count = await this.prisma.lawSection.count();
+    const laws = await this.prisma.lawSection.groupBy({
+      by: ['source'],
+      _count: { id: true },
+    });
+
+    return {
+      totalChunks: count,
+      lawsBySource: laws.map((l) => ({
+        source: l.source,
+        chunks: l._count.id,
+      })),
+      isEmpty: count === 0,
+    };
   }
 
   private vectorToLiteral(embedding: number[]): string {

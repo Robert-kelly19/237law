@@ -53,12 +53,9 @@ export class LLMResponseCacheService {
    */
   set(key: string, response: string): void {
     // Evict LRU entry if cache is full
-    if (
-      this.cache.size >= this.maxSize &&
-      !this.cache.has(key)
-    ) {
-      const lruKey = Array.from(this.cache.entries()).reduce((min, [k, entry]) =>
-        entry.hits < min[1].hits ? [k, entry] : min,
+    if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
+      const lruKey = Array.from(this.cache.entries()).reduce(
+        (min, [k, entry]) => (entry.hits < min[1].hits ? [k, entry] : min),
       )[0];
       this.cache.delete(lruKey);
     }
@@ -102,23 +99,26 @@ export class LLMResponseCacheService {
    * Periodically clean expired entries
    */
   private startCleanupInterval(): void {
-    this.cleanupIntervalId = setInterval(() => {
-      let cleaned = 0;
-      const now = Date.now();
+    this.cleanupIntervalId = setInterval(
+      () => {
+        let cleaned = 0;
+        const now = Date.now();
 
-      for (const [key, entry] of this.cache.entries()) {
-        if (now - entry.timestamp > this.ttl) {
-          this.cache.delete(key);
-          cleaned++;
+        for (const [key, entry] of this.cache.entries()) {
+          if (now - entry.timestamp > this.ttl) {
+            this.cache.delete(key);
+            cleaned++;
+          }
         }
-      }
 
-      if (cleaned > 0) {
-        this.logger.debug(
-          `LLM response cache cleanup: removed ${cleaned} expired entries (${this.cache.size} remaining)`,
-        );
-      }
-    }, 60 * 60 * 1000); // Run every hour
+        if (cleaned > 0) {
+          this.logger.debug(
+            `LLM response cache cleanup: removed ${cleaned} expired entries (${this.cache.size} remaining)`,
+          );
+        }
+      },
+      60 * 60 * 1000,
+    ); // Run every hour
   }
 
   /**

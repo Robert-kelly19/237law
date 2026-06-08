@@ -14,7 +14,9 @@ export class PdfService {
     const pdfsDir = path.join(process.cwd(), 'pdfs');
 
     if (!fs.existsSync(pdfsDir)) {
-      this.logger.warn('[PdfService] /pdfs folder not found. Skipping ingestion.');
+      this.logger.warn(
+        '[PdfService] /pdfs folder not found. Skipping ingestion.',
+      );
       return [];
     }
 
@@ -35,7 +37,9 @@ export class PdfService {
         await parser.destroy();
 
         const cleanedText = this.cleanText(data.text);
-        this.logger.log(`[PdfService] Extracted ${cleanedText.length} characters from ${file}`);
+        this.logger.log(
+          `[PdfService] Extracted ${cleanedText.length} characters from ${file}`,
+        );
 
         results.push({
           source: file,
@@ -53,10 +57,7 @@ export class PdfService {
    * Clean extracted PDF text (minimal cleaning - preserve structure)
    */
   private cleanText(text: string): string {
-    return text
-      .replace(/\r/g, '') 
-      .replace(/\n\n+/g, '\n') 
-      .trim();
+    return text.replace(/\r/g, '').replace(/\n\n+/g, '\n').trim();
   }
 
   /**
@@ -66,7 +67,7 @@ export class PdfService {
   chunkText(text: string, chunkSize = 500): string[] {
     // Split by sections first
     const sections = text.split(/(?=(?:SECTION|ARTICLE|CHAPTER)\s+\d+)/i);
-    
+
     const chunks: string[] = [];
 
     for (const section of sections) {
@@ -75,9 +76,11 @@ export class PdfService {
       // Extract header (first line)
       const lines = section.split('\n');
       const header = lines[0]?.trim() || '';
-      
-      // If section is small, keep header with content as one chunk
-      if (section.length <= chunkSize * 1.2) {
+
+      const sectionWordCount = section.split(/\s+/).filter(Boolean).length;
+
+      // If section is small in words, keep header with content as one chunk
+      if (sectionWordCount <= chunkSize * 1.2) {
         chunks.push(section.trim());
         continue;
       }
@@ -89,15 +92,17 @@ export class PdfService {
 
       for (const sentence of sentences) {
         const sentenceLength = sentence.split(/\s+/).length;
-        
 
-        if (currentLength + sentenceLength > chunkSize && currentChunk.length > 1) {
+        if (
+          currentLength + sentenceLength > chunkSize &&
+          currentChunk.length > 1
+        ) {
           chunks.push(currentChunk.join(' ').trim());
           // Reset with header for next chunk
           currentChunk = header ? [header] : [];
           currentLength = header.split(/\s+/).length;
         }
-        
+
         currentChunk.push(sentence);
         currentLength += sentenceLength;
       }
@@ -108,7 +113,7 @@ export class PdfService {
       }
     }
 
-    return chunks.filter(c => c.length > 0);
+    return chunks.filter((c) => c.length > 0);
   }
 
   /**

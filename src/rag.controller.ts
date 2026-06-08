@@ -80,15 +80,26 @@ export class RagController {
   /**
    * Manual trigger to re-ingest all PDFs (for testing/debugging)
    */
+  private readonly reingestLock = { running: false };
+
   @Post('reingest-all')
   async reingestAll() {
-    this.logger.log('Manual re-ingestion triggered');
-    const result = await this.ragService.ingestPdfs();
-    return {
-      success: true,
-      ingested: result.ingested,
-      skipped: result.skipped,
-    };
+    if (this.reingestLock.running) {
+      return { success: false, message: 'Ingestion already running' };
+    }
+    this.reingestLock.running = true;
+    try {
+      this.logger.log('Manual re-ingestion triggered');
+      const result = await this.ragService.ingestPdfs();
+      return {
+        success: true,
+        ingested: result.ingested,
+        skipped: result.skipped,
+        failed: result.failed,
+      };
+    } finally {
+      this.reingestLock.running = false;
+    }
   }
 
   /**
@@ -96,19 +107,6 @@ export class RagController {
    */
   @Get('ingest-status')
   async getIngestionStatus() {
-    const count = await this.ragService.prisma.lawSection.count();
-    const laws = await this.ragService.prisma.lawSection.groupBy({
-      by: ['source'],
-      _count: { id: true },
-    });
-    
-    return {
-      totalChunks: count,
-      lawsBySource: laws.map(l => ({
-        source: l.source,
-        chunks: l._count.id,
-      })),
-      isEmpty: count === 0,
-    };
+    return this.ragService.getIngestionStatus();
   }
 }

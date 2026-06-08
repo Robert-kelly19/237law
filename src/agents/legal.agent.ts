@@ -98,7 +98,8 @@ export class LegalAgentService {
         this.logger.debug(`Detected language: ${detectedLanguage}`);
 
         if (this.languageDetection.isGreeting(query.query)) {
-          const detectedGreetingLanguage = this.languageDetection.detectGreetingLanguage(query.query);
+          const detectedGreetingLanguage =
+            this.languageDetection.detectGreetingLanguage(query.query);
           const greeting = this.greetingsService.getGreeting(
             detectedGreetingLanguage,
             query.userId,
@@ -116,7 +117,10 @@ export class LegalAgentService {
                   step: 1,
                   action: 'detect_greeting',
                   input: query.query,
-                  output: { isGreeting: true, language: detectedGreetingLanguage },
+                  output: {
+                    isGreeting: true,
+                    language: detectedGreetingLanguage,
+                  },
                   confidence: 1.0,
                 },
               ],
@@ -141,12 +145,14 @@ export class LegalAgentService {
 
         // STEP 2 & 3: PARALLELIZE session, context, and embedding generation
         // These operations are independent and can run in parallel
-        const sessionId = await this.performanceTracker.track('getOrCreateSession', () =>
-          query.sessionId
-            ? Promise.resolve(query.sessionId)
-            : this.conversationService.getOrCreateSession(query.userId),
+        const sessionId = await this.performanceTracker.track(
+          'getOrCreateSession',
+          () =>
+            query.sessionId
+              ? Promise.resolve(query.sessionId)
+              : this.conversationService.getOrCreateSession(query.userId),
         );
-        
+
         const [context] = await Promise.all([
           this.performanceTracker.track('buildContextSummary', async () =>
             this.contextTool.buildContextSummary(query.userId, sessionId),
@@ -194,7 +200,8 @@ export class LegalAgentService {
         // STEP 6: RAG synthesis
         const synthesis = await this.performanceTracker.track(
           'synthesizeResults',
-          () => this.synthesizeResults(query.query, toolResults, detectedLanguage),
+          () =>
+            this.synthesizeResults(query.query, toolResults, detectedLanguage),
         );
 
         addReasoningStep({
@@ -241,7 +248,10 @@ export class LegalAgentService {
             importance: 3,
           }),
         ]).catch((err) => {
-          this.logger.error('Error storing conversation/memory in background:', err);
+          this.logger.error(
+            'Error storing conversation/memory in background:',
+            err,
+          );
         });
 
         return {
@@ -356,41 +366,42 @@ export class LegalAgentService {
     toolsUsed: string[];
     relatedArticles: any[];
   }> {
-    return this.performanceTracker.track(
-      'rag_synthesis_with_llm',
-      async () => {
-        const unique = toolResults.semanticResults;
+    return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
+      const unique = toolResults.semanticResults;
 
-        const citations = unique.map((a) =>
-          this.citationTool.generateInlineCitation(a),
-        );
+      const citations = unique.map((a) =>
+        this.citationTool.generateInlineCitation(a),
+      );
 
-        // Check LLM response cache
-        const cacheKey = this.llmCacheService.generateKey(query, [
-          'semantic_search',
-        ]);
-        const cachedResponse = this.llmCacheService.get(cacheKey);
+      // Check LLM response cache
+      const cacheKey = this.llmCacheService.generateKey(query, [
+        'semantic_search',
+      ]);
+      const cachedResponse = this.llmCacheService.get(cacheKey);
 
-        let answer: string;
+      let answer: string;
 
-        if (unique.length === 0) {
-          answer = `Sorry, I couldn't find a clear legal answer for your question.
+      if (unique.length === 0) {
+        answer = `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-        } else if (cachedResponse) {
-          this.logger.debug(`LLM response cache hit for query: ${query.substring(0, 50)}...`);
-          answer = cachedResponse;
-        } else {
-          const context = unique
-            .map(
-              (s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`,
-            )
-            .join('\n\n');
+      } else if (cachedResponse) {
+        this.logger.debug(
+          `LLM response cache hit for query: ${query.substring(0, 50)}...`,
+        );
+        answer = cachedResponse;
+      } else {
+        const context = unique
+          .map(
+            (s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`,
+          )
+          .join('\n\n');
 
-          const languageInstructions = this.getLanguageInstructions(detectedLanguage);
+        const languageInstructions =
+          this.getLanguageInstructions(detectedLanguage);
 
-          const prompt = `
+        const prompt = `
 You are a professional legal assistant specializing exclusively in Cameroonian law. You help ordinary citizens, entrepreneurs, students, and professionals understand their legal rights and obligations under Cameroonian legislation.
 
 ---
@@ -471,43 +482,42 @@ ${query}
 Answer:
 `;
 
-          const response = await this.performanceTracker.track(
-            'openai_chat_completion',
-            async () =>
-              this.openai.chat.completions.create({
-                model: 'gpt-4.1-mini',
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.3,
-                max_tokens: 500,
-              }),
-          );
+        const response = await this.performanceTracker.track(
+          'openai_chat_completion',
+          async () =>
+            this.openai.chat.completions.create({
+              model: 'gpt-4.1-mini',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: 0.3,
+              max_tokens: 500,
+            }),
+        );
 
-          answer = response.choices?.[0]?.message?.content?.trim() || '';
+        answer = response.choices?.[0]?.message?.content?.trim() || '';
 
-          if (!answer) {
-            answer = `Sorry, I couldn't find a clear legal answer for your question.
+        if (!answer) {
+          answer = `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-          } else {
-            // Cache the LLM response for future identical queries
-            this.llmCacheService.set(cacheKey, answer);
-          }
+        } else {
+          // Cache the LLM response for future identical queries
+          this.llmCacheService.set(cacheKey, answer);
         }
+      }
 
-        return {
-          answer,
-          citations,
-          citedArticles: unique.map((a) => ({
-            id: a.id,
-            lawName: a.lawName,
-            articleNumber: a.articleNumber,
-          })),
-          toolsUsed: ['semantic_search'],
-          relatedArticles: [],
-        };
-      },
-    );
+      return {
+        answer,
+        citations,
+        citedArticles: unique.map((a) => ({
+          id: a.id,
+          lawName: a.lawName,
+          articleNumber: a.articleNumber,
+        })),
+        toolsUsed: ['semantic_search'],
+        relatedArticles: [],
+      };
+    });
   }
 
   /**
@@ -517,8 +527,22 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
     const q = query.toLowerCase();
 
     const topics: Record<string, string[]> = {
-      'property law': ['property', 'land', 'rent', 'lease', 'tenant', 'landlord'],
-      'criminal law': ['crime', 'criminal', 'arrest', 'warrant', 'police', 'court'],
+      'property law': [
+        'property',
+        'land',
+        'rent',
+        'lease',
+        'tenant',
+        'landlord',
+      ],
+      'criminal law': [
+        'crime',
+        'criminal',
+        'arrest',
+        'warrant',
+        'police',
+        'court',
+      ],
       'contract law': ['contract', 'agreement', 'sign', 'breach', 'offer'],
       'employment law': ['job', 'work', 'employ', 'salary', 'worker', 'boss'],
       'family law': ['marriage', 'divorce', 'child', 'custody', 'alimony'],

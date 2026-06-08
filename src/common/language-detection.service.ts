@@ -1,10 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-export type DetectedLanguage = 
-  | 'english'
-  | 'french'
-  | 'pidgin'
-  | 'unknown';
+export type DetectedLanguage = 'english' | 'french' | 'pidgin' | 'unknown';
 
 @Injectable()
 export class LanguageDetectionService {
@@ -14,9 +10,11 @@ export class LanguageDetectionService {
    * Common greeting patterns for different languages
    */
   private readonly greetingPatterns: Record<DetectedLanguage, RegExp> = {
-    english: /\b(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
+    english:
+      /\b(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
     french: /\b(bonjour|bonsoir|salut|ça\s+va|allô|coucou|hé)\b/i,
-    pidgin: /\b(howdy|wey\s+dey|hello|hey|alright|how\s+body|washer|how\s+na|wha\s+\w+|abi|innit)\b/i,
+    pidgin:
+      /\b(howdy|wey\s+dey|hello|hey|alright|how\s+body|washer|how\s+na|wha\s+\w+|abi|innit)\b/i,
     unknown: /(?!)/,
   };
 
@@ -24,9 +22,12 @@ export class LanguageDetectionService {
    * Language-specific word patterns
    */
   private readonly languageIndicators: Record<DetectedLanguage, RegExp> = {
-    english: /\b(the|is|are|have|has|do|does|what|how|where|when|why|can|will|would|should|could|please|thanks|thank|you|me|i)\b/i,
-    french: /\b(le|la|les|un|une|des|et|est|sont|je|tu|il|elle|nous|vous|ils|elles|qui|que|quoi|où|quand|pourquoi|comment|s\'il\s+vous\s+plaît|merci|oui|non)\b/i,
-    pidgin: /\b(dey|wey|no\s+be|abi|eh|innit|masa|sef|o|o\s+lord|aunty|bro|fam|bruv|mandem|wallahi|alhamdulillah|walloh)\b/i,
+    english:
+      /\b(the|is|are|have|has|do|does|what|how|where|when|why|can|will|would|should|could|please|thanks|thank|you|me|i)\b/i,
+    french:
+      /\b(le|la|les|un|une|des|et|est|sont|je|tu|il|elle|nous|vous|ils|elles|qui|que|quoi|où|quand|pourquoi|comment|s\'il\s+vous\s+plaît|merci|oui|non)\b/i,
+    pidgin:
+      /\b(dey|wey|no\s+be|abi|eh|innit|masa|sef|o|o\s+lord|aunty|bro|fam|bruv|mandem|wallahi|alhamdulillah|walloh)\b/i,
     unknown: /(?!)/,
   };
 
@@ -72,14 +73,14 @@ export class LanguageDetectionService {
    */
   isGreeting(text: string): boolean {
     const normalizedText = text.toLowerCase().trim();
-    
+
     // Check all greeting patterns
     for (const pattern of Object.values(this.greetingPatterns)) {
       if (pattern.test(normalizedText)) {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -92,7 +93,12 @@ export class LanguageDetectionService {
     }
 
     const normalizedText = text.toLowerCase();
-    const scores: Record<DetectedLanguage, number> = { english: 0, french: 0, pidgin: 0, unknown: 0 };
+    const scores: Record<DetectedLanguage, number> = {
+      english: 0,
+      french: 0,
+      pidgin: 0,
+      unknown: 0,
+    };
 
     for (const [lang, pattern] of Object.entries(this.greetingPatterns)) {
       const matches = (normalizedText.match(pattern) || []).length;

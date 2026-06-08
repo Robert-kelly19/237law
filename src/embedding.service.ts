@@ -66,7 +66,7 @@ export class EmbeddingService {
           });
           embeddings.push(...response.data.map((d) => d.embedding));
         } catch (error) {
-          console.error('Error generating embeddings:', error);
+          this.logger.error('Error generating embeddings:', error);
           throw error;
         }
       }
@@ -79,31 +79,28 @@ export class EmbeddingService {
    * Generates embedding for a single query text with caching.
    */
   async generateQueryEmbedding(query: string): Promise<number[]> {
-    return this.performanceTracker.track(
-      'generateQueryEmbedding',
-      async () => {
-        // Check cache first
-        const cached = this.cacheService.get(query);
-        if (cached) {
-          this.logger.debug(
-            `Embedding cache hit for query (length: ${query.length})`,
-          );
-          return cached;
-        }
+    return this.performanceTracker.track('generateQueryEmbedding', async () => {
+      // Check cache first
+      const cached = this.cacheService.get(query);
+      if (cached) {
+        this.logger.debug(
+          `Embedding cache hit for query (length: ${query.length})`,
+        );
+        return cached;
+      }
 
-        // Generate new embedding
-        const response = await this.openai.embeddings.create({
-          model: 'text-embedding-3-small',
-          input: query,
-        });
+      // Generate new embedding
+      const response = await this.openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: query,
+      });
 
-        const embedding = response.data[0].embedding;
+      const embedding = response.data[0].embedding;
 
-        // Cache the result
-        this.cacheService.set(query, embedding);
+      // Cache the result
+      this.cacheService.set(query, embedding);
 
-        return embedding;
-      },
-    );
+      return embedding;
+    });
   }
 }

@@ -56,18 +56,18 @@ interface WebhookText {
 @Controller('whatsapp')
 export class WhatsappController implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsappController.name);
-  
+
   /**
    * Track processed message IDs to prevent duplicate webhook processing
    * Key: WhatsApp message ID, Value: timestamp when processed
    */
   private readonly processedMessages = new Map<string, number>();
-  
+
   /**
    * Time-to-live for message deduplication (5 minutes)
    */
   private readonly MESSAGE_TTL = 300000;
-  
+
   /**
    * Interval to cleanup old message entries (every minute)
    */
@@ -235,4 +235,3 @@ export class WhatsappController implements OnModuleDestroy {
     }
   }
 }
-

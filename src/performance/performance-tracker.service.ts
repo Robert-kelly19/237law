@@ -111,7 +111,9 @@ export class PerformanceTrackerService {
    * Get performance summary for current session
    */
   getSummary(): { [key: string]: { avg: number; count: number; max: number } } {
-    const summary: { [key: string]: { count: number; total: number; max: number } } = {};
+    const summary: {
+      [key: string]: { count: number; total: number; max: number };
+    } = {};
 
     for (const metric of this.metrics) {
       if (!summary[metric.step]) {
@@ -125,7 +127,9 @@ export class PerformanceTrackerService {
       );
     }
 
-    const result: { [key: string]: { avg: number; count: number; max: number } } = {};
+    const result: {
+      [key: string]: { avg: number; count: number; max: number };
+    } = {};
     for (const [step, stats] of Object.entries(summary)) {
       result[step] = {
         avg: Math.round(stats.total / stats.count),

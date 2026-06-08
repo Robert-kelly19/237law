@@ -32,16 +32,12 @@ export class LawSearchTool {
    * Search law sections by keyword with performance tracking
    */
   async searchByKeyword(query: string, limit: number = 5): Promise<ToolResult> {
-    return this.performanceTracker.track(
-      'searchByKeyword',
-      async () => {
-        try {
-          this.logger.debug(
-            `Searching by keyword: ${query} (limit: ${limit})`,
-          );
+    return this.performanceTracker.track('searchByKeyword', async () => {
+      try {
+        this.logger.debug(`Searching by keyword: ${query} (limit: ${limit})`);
 
-          // Full-text search using PostgreSQL
-          const results = await this.prisma.$queryRaw<LawSearchResult[]>`
+        // Full-text search using PostgreSQL
+        const results = await this.prisma.$queryRaw<LawSearchResult[]>`
             SELECT 
               id,
               "lawName",
@@ -56,42 +52,39 @@ export class LawSearchTool {
             LIMIT ${limit}
           `;
 
-          return {
-            success: true,
-            data: results,
-            reasoning: `Found ${results.length} law sections matching keyword "${query}"`,
-          };
-        } catch (error: any) {
-          this.logger.error(
-            `Keyword search failed: ${error.message}`,
-            error.stack,
-          );
-          return {
-            success: false,
-            data: [],
-            reasoning: `Keyword search failed: ${error.message}`,
-          };
-        }
-      },
-    );
+        return {
+          success: true,
+          data: results,
+          reasoning: `Found ${results.length} law sections matching keyword "${query}"`,
+        };
+      } catch (error: any) {
+        this.logger.error(
+          `Keyword search failed: ${error.message}`,
+          error.stack,
+        );
+        return {
+          success: false,
+          data: [],
+          reasoning: `Keyword search failed: ${error.message}`,
+        };
+      }
+    });
   }
 
   /**
    * Search law sections by semantic similarity with performance tracking
    */
   async searchByTopic(topic: string, limit: number = 5): Promise<ToolResult> {
-    return this.performanceTracker.track(
-      'searchByTopic',
-      async () => {
-        try {
-          this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);
+    return this.performanceTracker.track('searchByTopic', async () => {
+      try {
+        this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);
 
-          // Generate embedding for the topic (with caching)
-          const topicEmbedding =
-            await this.embeddingService.generateQueryEmbedding(topic);
+        // Generate embedding for the topic (with caching)
+        const topicEmbedding =
+          await this.embeddingService.generateQueryEmbedding(topic);
 
-          // Vector similarity search using PostgreSQL with HNSW index
-          const results = await this.prisma.$queryRaw<any[]>`
+        // Vector similarity search using PostgreSQL with HNSW index
+        const results = await this.prisma.$queryRaw<any[]>`
             SELECT 
               id,
               "lawName",
@@ -104,24 +97,20 @@ export class LawSearchTool {
             LIMIT ${limit}
           `;
 
-          return {
-            success: true,
-            data: results,
-            reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
-          };
-        } catch (error: any) {
-          this.logger.error(
-            `Topic search failed: ${error.message}`,
-            error.stack,
-          );
-          return {
-            success: false,
-            data: [],
-            reasoning: `Topic search failed: ${error.message}`,
-          };
-        }
-      },
-    );
+        return {
+          success: true,
+          data: results,
+          reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
+        };
+      } catch (error: any) {
+        this.logger.error(`Topic search failed: ${error.message}`, error.stack);
+        return {
+          success: false,
+          data: [],
+          reasoning: `Topic search failed: ${error.message}`,
+        };
+      }
+    });
   }
 
   /**
