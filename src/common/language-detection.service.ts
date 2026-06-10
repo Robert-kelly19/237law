@@ -142,7 +142,7 @@ export class LanguageDetectionService {
   /**
    * Check if text is a greeting ONLY (no substantial content after greeting)
    * Returns true only for pure greetings like "hello", "hey", "hi there"
-   * Updated: stricter check requiring ≤5 words conversation-wide with no legal keywords
+   * Updated: stricter check requiring ≤5 words in the provided message/text only, with no legal keywords
    */
   isGreetingOnly(text: string): boolean {
     if (!this.isGreeting(text)) {
@@ -249,7 +249,7 @@ export class LanguageDetectionService {
       pattern.test(text),
     );
 
-    return hasLegalKeyword || hasIntentPattern;
+    return hasLegalKeyword && hasIntentPattern;
   }
 
   /**

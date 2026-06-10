@@ -252,7 +252,7 @@ export class LegalAgentService {
         );
 
         addReasoningStep({
-          step: 4,
+          step: 5,
           action: 'execute_tools',
           input: JSON.stringify(toolPlan),
           output: toolResults,
@@ -267,7 +267,7 @@ export class LegalAgentService {
         );
 
         addReasoningStep({
-          step: 5,
+          step: 6,
           action: 'synthesize',
           input: JSON.stringify(toolResults),
           output: synthesis,

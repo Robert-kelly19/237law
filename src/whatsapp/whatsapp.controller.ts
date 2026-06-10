@@ -14,6 +14,7 @@ import type { Response } from 'express';
 import { LanguageDetectionService } from '../common/language-detection.service';
 import { WhatsappService } from './whatsapp.service';
 import { LegalAgentService } from '../agents/legal.agent';
+import { ConversationService } from '../memory/conversation.service';
 
 interface WhatsappWebhookBody {
   object?: string;
@@ -91,12 +92,13 @@ export class WhatsappController implements OnModuleDestroy {
   /**
    * Delay to wait for follow-up after greeting (milliseconds)
    */
-  private readonly GREETING_BUFFER_DELAY = 100;
+  private readonly GREETING_BUFFER_DELAY = 3000;
 
   constructor(
     private whatsappService: WhatsappService,
     private legalAgent: LegalAgentService,
     private languageDetection: LanguageDetectionService,
+    private conversationService: ConversationService,
   ) {
     // Start background cleanup task
     this.startCleanupTask();
@@ -245,9 +247,10 @@ export class WhatsappController implements OnModuleDestroy {
 
         // Send the greeting response after waiting for follow-up
         try {
+          const sessionId = await this.conversationService.getOrCreateSession(from);
           const response = await this.legalAgent.processQuery({
             userId: from,
-            sessionId: from,
+            sessionId,
             query: text,
           });
 
@@ -289,9 +292,10 @@ export class WhatsappController implements OnModuleDestroy {
 
     // Process the message normally through the agent
     try {
+      const sessionId = await this.conversationService.getOrCreateSession(from);
       const response = await this.legalAgent.processQuery({
         userId: from,
-        sessionId: from,
+        sessionId,
         query: text,
       });
 

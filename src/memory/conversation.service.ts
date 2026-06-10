@@ -262,7 +262,6 @@ export class ConversationService {
   async detectMessagePattern(
     userId: string,
     sessionId: string,
-    currentQuery: string,
   ): Promise<{
     pattern: 'greeting_to_question' | 'question_only' | 'greeting_only' | 'other';
     shouldSkipGreeting: boolean;
