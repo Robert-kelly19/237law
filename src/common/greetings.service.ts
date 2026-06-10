@@ -218,6 +218,46 @@ export class GreetingsService {
   }
 
   /**
+   * Get a follow-up greeting for when user has already been greeted
+   * Returns shorter, more direct prompts to continue the conversation
+   */
+  getFollowUpGreeting(language: DetectedLanguage): string {
+    const followUpGreetings: Record<DetectedLanguage, string[]> = {
+      english: [
+        'How can I help you?',
+        'What legal question do you have?',
+        'What do you need help with?',
+        'What can I assist you with?',
+        'How may I help you today?',
+      ],
+      french: [
+        'Comment puis-je vous aider?',
+        'Quelle question juridique avez-vous?',
+        'De quoi avez-vous besoin?',
+        'Comment puis-je vous assister?',
+        'Quelle aide cherchez-vous?',
+      ],
+      pidgin: [
+        'Wetin be your legal palaver today?',
+        'Which legal question you get?',
+        'How I go assist you?',
+        'Wetin you need from me?',
+        'Wetin dey your mind?',
+      ],
+      unknown: [
+        'How can I help you?',
+        'What can I assist you with?',
+        'What do you need?',
+      ],
+    };
+
+    const greetings =
+      followUpGreetings[language] || followUpGreetings.english;
+
+    return greetings[Math.floor(Math.random() * greetings.length)];
+  }
+
+  /**
    * Clear greeting history for a user (useful for testing or manual reset)
    */
   clearUserHistory(userId: string): void {

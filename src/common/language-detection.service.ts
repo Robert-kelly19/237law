@@ -121,4 +121,141 @@ export class LanguageDetectionService {
 
     return detectedLanguage;
   }
+
+  /**
+   * Check if text is a question
+   */
+  private isQuestion(text: string): boolean {
+    const trimmed = text.trim();
+    if (trimmed.endsWith('?')) {
+      return true;
+    }
+
+    const questionPatterns = [
+      /\b(what|when|where|who|why|how|which|can|could|should|would|is|are|do|does|did|will)\b/i,
+    ];
+
+    const firstWord = trimmed.split(/\s+/)[0];
+    return questionPatterns.some((pattern) => pattern.test(firstWord || ''));
+  }
+
+  /**
+   * Check if text is a greeting ONLY (no substantial content after greeting)
+   * Returns true only for pure greetings like "hello", "hey", "hi there"
+   * Updated: stricter check requiring ≤5 words conversation-wide with no legal keywords
+   */
+  isGreetingOnly(text: string): boolean {
+    if (!this.isGreeting(text)) {
+      return false;
+    }
+
+    const wordCount = text.trim().split(/\s+/).length;
+    const hasLegalKeyword = this.hasLegalIntent(text);
+
+    return wordCount <= 5 && !hasLegalKeyword;
+  }
+
+  /**
+   * Check if text contains both a greeting and a legal question/intent
+   * Example: "Hey, I need help with contract law"
+   */
+  isGreetingWithQuestion(text: string): boolean {
+    if (!this.isGreeting(text)) {
+      return false;
+    }
+
+    return this.hasLegalIntent(text);
+  }
+
+  /**
+   * Categorize the intent type of a message
+   */
+  detectIntentType(
+    text: string,
+  ): 'greeting_only' | 'question_only' | 'greeting_with_question' | 'other' {
+    if (this.isGreetingOnly(text)) {
+      return 'greeting_only';
+    }
+
+    if (this.isGreeting(text) && this.hasLegalIntent(text)) {
+      return 'greeting_with_question';
+    }
+
+    if (this.hasLegalIntent(text) || this.isQuestion(text)) {
+      return 'question_only';
+    }
+
+    return 'other';
+  }
+
+  /**
+   * Check if text contains legal intent keywords and question patterns
+   * Returns true if the text seems to be asking for legal help
+   */
+  hasLegalIntent(text: string): boolean {
+    const lowerText = text.toLowerCase();
+
+    // Legal domain keywords
+    const legalKeywords = [
+      'law',
+      'legal',
+      'court',
+      'judge',
+      'arrest',
+      'lawsuit',
+      'sue',
+      'contract',
+      'rights',
+      'police',
+      'warrant',
+      'bail',
+      'charge',
+      'guilty',
+      'innocent',
+      'attorney',
+      'lawyer',
+      'case',
+      'trial',
+      'verdict',
+      'sentence',
+      'crime',
+      'criminal',
+      'civil',
+      'property',
+      'inheritance',
+      'divorce',
+      'custody',
+      'harassment',
+      'assault',
+      'theft',
+      'fraud',
+      'liability',
+    ];
+
+    // Question/help request patterns
+    const intentPatterns = [
+      /\b(help|assist|advice|guide|explain|understand|question|ask|about|regarding|concern|issue|problem)\b/i,
+      /\b(can\s+(i|you|we)|could|should|would|how|what|when|where|why|which)\b/i,
+      /\b(need|want|require|looking for|searching for)\b/i,
+    ];
+
+    // Check if any legal keywords are present
+    const hasLegalKeyword = legalKeywords.some((keyword) =>
+      lowerText.includes(keyword),
+    );
+
+    // Check if any intent patterns match
+    const hasIntentPattern = intentPatterns.some((pattern) =>
+      pattern.test(text),
+    );
+
+    return hasLegalKeyword || hasIntentPattern;
+  }
+
+  /**
+   * Detect if text is primarily legal in nature (without greeting)
+   */
+  isLegalQuery(text: string): boolean {
+    return this.hasLegalIntent(text) && !this.isGreetingOnly(text);
+  }
 }

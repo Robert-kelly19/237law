@@ -215,4 +215,105 @@ export class ConversationService {
       throw error;
     }
   }
+
+  /**
+   * Check if user has been greeted recently in this session (last 5 turns)
+   */
+  async hasRecentGreeting(userId: string, sessionId: string): Promise<boolean> {
+    try {
+      const recentTurns = await this.memoryService.getConversationHistory(
+        userId,
+        sessionId,
+        { lastN: 5 },
+      );
+
+      if (recentTurns.length === 0) {
+        return false;
+      }
+
+      // Check if any recent turn was a greeting response
+      return recentTurns.some((turn) => {
+        const response = turn.response.toLowerCase();
+        const isGreetingResponse =
+          response.includes('hello') ||
+          response.includes('welcome') ||
+          response.includes('greetings') ||
+          response.includes('how can i help');
+
+        // Check if tools used contains greeting_detector
+        return (
+          isGreetingResponse ||
+          turn.toolsUsed?.includes('greeting_detector')
+        );
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to check recent greeting: ${error.message}`,
+        error.stack,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Detect message pattern in current conversation
+   * Identifies patterns like "greeting_to_question" to enable context-aware responses
+   */
+  async detectMessagePattern(
+    userId: string,
+    sessionId: string,
+    currentQuery: string,
+  ): Promise<{
+    pattern: 'greeting_to_question' | 'question_only' | 'greeting_only' | 'other';
+    shouldSkipGreeting: boolean;
+    previousTurnCount: number;
+  }> {
+    try {
+      const recentTurns = await this.memoryService.getConversationHistory(
+        userId,
+        sessionId,
+        { lastN: 2 },
+      );
+
+      const previousTurnCount = recentTurns.length;
+
+      if (previousTurnCount === 0) {
+        return {
+          pattern: 'other',
+          shouldSkipGreeting: false,
+          previousTurnCount: 0,
+        };
+      }
+
+      // Check if previous turn was a greeting
+      const previousTurn = recentTurns[recentTurns.length - 1];
+      const prevWasGreeting = previousTurn.toolsUsed?.includes(
+        'greeting_detector',
+      );
+
+      if (prevWasGreeting) {
+        return {
+          pattern: 'greeting_to_question',
+          shouldSkipGreeting: true,
+          previousTurnCount,
+        };
+      }
+
+      return {
+        pattern: 'other',
+        shouldSkipGreeting: false,
+        previousTurnCount,
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to detect message pattern: ${error.message}`,
+        error.stack,
+      );
+      return {
+        pattern: 'other',
+        shouldSkipGreeting: false,
+        previousTurnCount: 0,
+      };
+    }
+  }
 }

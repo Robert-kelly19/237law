@@ -93,58 +93,7 @@ export class LegalAgentService {
           `Processing query for (length: ${query.query.length})`,
         );
 
-        // STEP 0: Detect language and check for greetings
-        const detectedLanguage = this.languageDetection.detect(query.query);
-        this.logger.debug(`Detected language: ${detectedLanguage}`);
-
-        if (this.languageDetection.isGreeting(query.query)) {
-          const detectedGreetingLanguage =
-            this.languageDetection.detectGreetingLanguage(query.query);
-          const greeting = this.greetingsService.getGreeting(
-            detectedGreetingLanguage,
-            query.userId,
-          );
-          this.logger.debug(`Greeting detected, returning: ${greeting}`);
-
-          return {
-            answer: greeting,
-            citations: [],
-            reasoning: {
-              confidence: 1.0,
-              toolsUsed: ['greeting_detector'],
-              steps: [
-                {
-                  step: 1,
-                  action: 'detect_greeting',
-                  input: query.query,
-                  output: {
-                    isGreeting: true,
-                    language: detectedGreetingLanguage,
-                  },
-                  confidence: 1.0,
-                },
-              ],
-            },
-            relatedArticles: [],
-          };
-        }
-
-        // STEP 1: Lightweight intent analysis (NO taxonomy)
-        const analysis = this.performanceTracker.trackSync(
-          'analyze_query',
-          () => this.analyzeQuery(query.query),
-        );
-
-        addReasoningStep({
-          step: 1,
-          action: 'analyze_query',
-          input: query.query,
-          output: analysis,
-          confidence: analysis.confidence,
-        });
-
-        // STEP 2 & 3: PARALLELIZE session, context, and embedding generation
-        // These operations are independent and can run in parallel
+        // STEP 0: Get session ID first (needed for context checking)
         const sessionId = await this.performanceTracker.track(
           'getOrCreateSession',
           () =>
@@ -153,6 +102,119 @@ export class LegalAgentService {
               : this.conversationService.getOrCreateSession(query.userId),
         );
 
+        // STEP 1: Detect language and check for greetings WITH context awareness
+        const detectedLanguage = this.languageDetection.detect(query.query);
+        this.logger.debug(`Detected language: ${detectedLanguage}`);
+
+        // NEW: Check context-aware greeting logic
+        const isGreetingOnly = this.languageDetection.isGreetingOnly(
+          query.query,
+        );
+        const hasLegalIntent = this.languageDetection.hasLegalIntent(
+          query.query,
+        );
+
+        if (isGreetingOnly) {
+          // Pure greeting without legal content - check if user was recently greeted
+          const hasRecentGreeting =
+            await this.conversationService.hasRecentGreeting(
+              query.userId,
+              sessionId,
+            );
+
+          if (hasRecentGreeting) {
+            // User already greeted in this session, skip greeting response
+            this.logger.debug(
+              `User already greeted recently, skipping greeting response`,
+            );
+
+            const followUpGreeting = this.greetingsService.getFollowUpGreeting(
+              detectedLanguage,
+            );
+
+            // Use follow-up greeting instead of formal greeting
+            return {
+              answer: followUpGreeting,
+              citations: [],
+              reasoning: {
+                confidence: 1.0,
+                toolsUsed: ['greeting_skip_detector'],
+                steps: [
+                  {
+                    step: 1,
+                    action: 'detect_greeting_skip',
+                    input: query.query,
+                    output: {
+                      isGreetingOnly: true,
+                      hasRecentGreeting: true,
+                      skipped: true,
+                    },
+                    confidence: 1.0,
+                  },
+                ],
+              },
+              relatedArticles: [],
+            };
+          } else {
+            // First greeting in session - send greeting
+            const detectedGreetingLanguage =
+              this.languageDetection.detectGreetingLanguage(query.query);
+            const greeting = this.greetingsService.getGreeting(
+              detectedGreetingLanguage,
+              query.userId,
+            );
+            this.logger.debug(`First greeting detected, returning: ${greeting}`);
+
+            return {
+              answer: greeting,
+              citations: [],
+              reasoning: {
+                confidence: 1.0,
+                toolsUsed: ['greeting_detector'],
+                steps: [
+                  {
+                    step: 1,
+                    action: 'detect_greeting',
+                    input: query.query,
+                    output: {
+                      isGreeting: true,
+                      language: detectedGreetingLanguage,
+                    },
+                    confidence: 1.0,
+                  },
+                ],
+              },
+              relatedArticles: [],
+            };
+          }
+        }
+
+        // If text has greeting + legal intent, skip greeting response
+        if (
+          this.languageDetection.isGreeting(query.query) &&
+          hasLegalIntent
+        ) {
+          this.logger.debug(
+            `Greeting with legal intent detected, proceeding to legal processing`,
+          );
+          // Continue to legal processing below
+        }
+
+        // STEP 2: Lightweight intent analysis (NO taxonomy)
+        const analysis = this.performanceTracker.trackSync(
+          'analyze_query',
+          () => this.analyzeQuery(query.query),
+        );
+
+        addReasoningStep({
+          step: 2,
+          action: 'analyze_query',
+          input: query.query,
+          output: analysis,
+          confidence: analysis.confidence,
+        });
+
+        // STEP 3: Build context with already-fetched sessionId
         const [context] = await Promise.all([
           this.performanceTracker.track('buildContextSummary', async () =>
             this.contextTool.buildContextSummary(query.userId, sessionId),
@@ -163,7 +225,7 @@ export class LegalAgentService {
         ]);
 
         addReasoningStep({
-          step: 2,
+          step: 3,
           action: 'context',
           input: sessionId,
           output: context.data,
@@ -176,7 +238,7 @@ export class LegalAgentService {
         );
 
         addReasoningStep({
-          step: 3,
+          step: 4,
           action: 'plan_tools',
           input: query.query,
           output: toolPlan,
