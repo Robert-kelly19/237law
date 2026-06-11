@@ -89,7 +89,10 @@ export class RagController {
   }
 
   /**
-   * Manual trigger to re-ingest all PDFs (for testing/debugging)
+   * Manual trigger to re-ingest all PDFs (for testing/debugging).
+   * Accepts an optional body.force flag; when true, it forces re-ingestion of
+   * already-ingested sources by overriding the normal dedup/skip logic. When
+   * omitted or false, already-ingested sources are skipped.
    */
   private readonly reingestLock = { running: false };
 

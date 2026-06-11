@@ -40,6 +40,7 @@ export class LawSearchTool {
           .split(/\s+/)
           .map((term) => term.trim())
           .filter((term) => term.length > 1)
+          .map((term) => term.replace(/([%_\\])/g, '\\$1'))
           .map((term) => `%${term}%`);
 
         // Full-text search using PostgreSQL
@@ -61,6 +62,7 @@ export class LawSearchTool {
               OR content ILIKE ANY (${terms}::text[])
               OR "lawName" ILIKE ANY (${terms}::text[])
               OR "articleNumber" ILIKE ANY (${terms}::text[])
+            ORDER BY id
             LIMIT ${limit}
           `;
 

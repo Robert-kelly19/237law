@@ -9,6 +9,7 @@ import { LLMResponseCacheService } from '../cache/llm-response-cache.service';
 import { EmbeddingService } from '../embedding.service';
 import { LanguageDetectionService } from '../common/language-detection.service';
 import { GreetingsService } from '../common/greetings.service';
+import { LEGAL_CORE_RULES_PROMPT } from '../common/legal-core-rules-prompt';
 import OpenAI from 'openai';
 
 /**
@@ -400,21 +401,35 @@ export class LegalAgentService {
         const articleMatch = query.match(/\b(?:article|art\.?)\s*([\d\w-]+)/i);
 
         if (articleMatch) {
-          const exactArticleRes = await this.lawSearchTool.searchByLawAndArticle(
-            '',
+          const lawName = this.deriveLawNameFromArticleQuery(
+            query,
             articleMatch[1],
           );
-          const exactArticleData = exactArticleRes.success
-            ? exactArticleRes.data
-            : [];
 
-          for (const item of exactArticleData) {
-            merged.set(item.id, item);
+          if (lawName) {
+            const exactArticleRes =
+              await this.lawSearchTool.searchByLawAndArticle(
+                lawName,
+                articleMatch[1],
+              );
+            const exactArticleData = exactArticleRes.success
+              ? exactArticleRes.data
+              : [];
+
+            for (const item of exactArticleData) {
+              merged.set(item.id, item);
+            }
+          } else {
+            this.logger.warn(
+              `Article number found without a law name; skipping exact article search: ${query}`,
+            );
           }
         }
 
-        const semanticRes = await this.lawSearchTool.searchByTopic(query, 10);
-        const keywordRes = await this.lawSearchTool.searchByKeyword(query, 10);
+        const [semanticRes, keywordRes] = await Promise.all([
+          this.lawSearchTool.searchByTopic(query, 10),
+          this.lawSearchTool.searchByKeyword(query, 10),
+        ]);
 
         const semanticData = semanticRes.success ? semanticRes.data : [];
         const keywordData = keywordRes.success ? keywordRes.data : [];
@@ -506,16 +521,7 @@ IDENTITY & SCOPE:
 
 ---
 
-CORE RULES — NEVER VIOLATE THESE:
-1. NEVER invent, fabricate, or paraphrase laws. Only cite laws explicitly found in the provided context.
-2. NEVER use internal identifiers such as "chunk-*", "doc-*", or any database IDs.
-3. NEVER start your response with "Yes" or "No" unless the question is a direct yes/no question (e.g., "Is it legal to…?").
-4. If the context contains NO relevant legal provision, respond EXACTLY with: "No clear legal provision was found in the available laws for this question. Please consult a qualified Cameroonian lawyer."
-5. Do NOT speculate or fill gaps with general legal knowledge when the context is silent.
-6. If the retrieved Context does not contain the exact law/article, do not cite it.
-7. Do not write phrases like "generally applies", "usually applies", "in general", or "not in the provided context but..."
-8. If no relevant lease, rent, eviction, or commercial tenancy provision appears in the Context, say clearly that no clear provision was found.
-9. Never use general legal knowledge to fill missing law.
+${LEGAL_CORE_RULES_PROMPT}
 
 ---
 
@@ -586,27 +592,27 @@ Answer:
             }),
         );
 
-        answer = response.choices?.[0]?.message?.content?.trim() || '';
+        const originalAnswer =
+          response.choices?.[0]?.message?.content?.trim() || '';
 
         const fallback = `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
 
-        if (
-          !answer ||
-          answer.toLowerCase().includes('generally applies') ||
-          answer.toLowerCase().includes('not in the provided context') ||
-          answer.toLowerCase().includes('in general')
-        ) {
-          answer = fallback;
-        }
+        const isUsableAnswer =
+          originalAnswer.length > 0 &&
+          !originalAnswer.toLowerCase().includes('generally applies') &&
+          !originalAnswer
+            .toLowerCase()
+            .includes('not in the provided context') &&
+          !originalAnswer.toLowerCase().includes('in general');
 
-        if (!answer) {
-          answer = fallback;
+        if (isUsableAnswer) {
+          answer = originalAnswer;
+          this.llmCacheService.set(cacheKey, originalAnswer);
         } else {
-          // Cache the LLM response for future identical queries
-          this.llmCacheService.set(cacheKey, answer);
+          answer = fallback;
         }
       }
 
@@ -622,6 +628,54 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
         relatedArticles: [],
       };
     });
+  }
+
+  private deriveLawNameFromArticleQuery(
+    query: string,
+    articleNumber: string,
+  ): string | null {
+    const escapedArticleNumber = this.escapeRegExp(articleNumber);
+    const articlePattern = `\\b(?:article|art\\.?)\\s*${escapedArticleNumber}\\b`;
+    const lawNames = [
+      'Cameroonian Civil Code',
+      'Civil Code',
+      'Cameroon Criminal Procedure Code',
+      'Criminal Procedure Code',
+      'Cameroon Labour Code',
+      'Labour Code',
+      'Cameroonian Penal Code',
+      'Penal Code',
+      'OHADA Uniform Act on General Commercial Law',
+      'General Commercial Law',
+      'OHADA Uniform Act on Simplified Recovery Procedures and Enforcement Measures',
+      'Simplified Recovery Procedures and Enforcement Measures',
+      'OHADA Uniform Act on Cooperative Societies',
+      'Cooperative Societies',
+      'Civil Registration System Law',
+      'Constitution of Cameroon',
+      'Law Relating to Cybersecurity and Cybercriminality',
+    ];
+
+    for (const lawName of lawNames) {
+      const escapedLawName = this.escapeRegExp(lawName);
+      const withOptionalThe = `(?:the\\s+)?${escapedLawName}`;
+
+      if (
+        new RegExp(`${escapedLawName}.*${articlePattern}`, 'i').test(query) ||
+        new RegExp(
+          `${articlePattern}.*\\b(?:of|under|pursuant\\s+to)\\s+${withOptionalThe}\\b`,
+          'i',
+        ).test(query)
+      ) {
+        return lawName;
+      }
+    }
+
+    return null;
+  }
+
+  private escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   /**

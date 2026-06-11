@@ -8,22 +8,21 @@ export class PdfService {
   private readonly logger = new Logger(PdfService.name);
 
   private readonly friendlyLawNames: Record<string, string> = {
-    '2010-Ohada-General-Commercial-Law-en':
+    '2010 ohada general commercial law en':
       'OHADA Uniform Act on General Commercial Law',
-    AUPSRVE_English:
+    'aupsrve english':
       'OHADA Uniform Act on Simplified Recovery Procedures and Enforcement Measures',
-    Cameroon_Criminal_Procedure_Code_2005:
-      'Cameroon Criminal Procedure Code',
-    Cameroon_Labor_Code: 'Cameroon Labour Code',
-    Civil_Code_Cameroon: 'Cameroonian Civil Code',
-    'Civil Code': 'Cameroonian Civil Code',
-    Code_civil: 'Cameroonian Civil Code',
-    'Ohada-Uniform-Act-Cooperatives-en':
+    'cameroon criminal procedure code 2005': 'Cameroon Criminal Procedure Code',
+    'cameroon labor code': 'Cameroon Labour Code',
+    'civil code cameroon': 'Cameroonian Civil Code',
+    'civil code': 'Cameroonian Civil Code',
+    'code civil': 'Cameroonian Civil Code',
+    'ohada uniform act cooperatives en':
       'OHADA Uniform Act on Cooperative Societies',
-    'Penal code eng original': 'Cameroonian Penal Code',
-    'The_Civil_Registration_System_Law': 'Civil Registration System Law',
-    The_constitution: 'Constitution of Cameroon',
-    'law_relating_to_cybersecurity_and_cybercriminality-1':
+    'penal code eng original': 'Cameroonian Penal Code',
+    'the civil registration system law': 'Civil Registration System Law',
+    'the constitution': 'Constitution of Cameroon',
+    'law relating to cybersecurity and cybercriminality 1':
       'Law Relating to Cybersecurity and Cybercriminality',
   };
 
@@ -87,7 +86,7 @@ export class PdfService {
   chunkText(text: string, chunkSize = 500): string[] {
     // Split by sections first
     const sections = text.split(
-      /(?=(?:SECTION|ARTICLE|Article|Art\.|CHAPTER|Chapter)\s+[\dA-Za-z]+)/i,
+      /(?=(?:section|article|art\.|chapter)\s*[\dA-Za-z]+)/i,
     );
 
     const chunks: string[] = [];
@@ -150,8 +149,8 @@ export class PdfService {
 
     // More aggressive section/article matching
     const articleMatch =
-      text.match(/(?:SECTION|ARTICLE|Article|Art\.)\s+([\dA-Za-z]+)/i) ||
-      text.match(/(?:PART|Chapter)\s+([IVXLCDM]+)/i);
+      text.match(/(?:section|article|art\.)\s*([\dA-Za-z]+)/i) ||
+      text.match(/(?:part|chapter)\s*([IVXLCDM]+)/i);
 
     return {
       lawName,
@@ -161,7 +160,10 @@ export class PdfService {
 
   private getFriendlyLawName(source: string): string {
     const baseName = path.parse(source).name;
-    const normalized = baseName.toLowerCase().replace(/[-_\s]+/g, ' ').trim();
+    const normalized = baseName
+      .toLowerCase()
+      .replace(/[-_\s]+/g, ' ')
+      .trim();
 
     if (
       normalized.includes('civil code') ||
@@ -170,6 +172,6 @@ export class PdfService {
       return 'Cameroonian Civil Code';
     }
 
-    return this.friendlyLawNames[baseName] || baseName;
+    return this.friendlyLawNames[normalized] || baseName;
   }
 }
