@@ -36,9 +36,15 @@ export class LawSearchTool {
       try {
         this.logger.debug(`Searching by keyword: ${query} (limit: ${limit})`);
 
+        const terms = query
+          .split(/\s+/)
+          .map((term) => term.trim())
+          .filter((term) => term.length > 1)
+          .map((term) => `%${term}%`);
+
         // Full-text search using PostgreSQL
         const results = await this.prisma.$queryRaw<LawSearchResult[]>`
-            SELECT 
+            SELECT DISTINCT
               id,
               "lawName",
               "articleNumber",
@@ -47,8 +53,14 @@ export class LawSearchTool {
             FROM law_sections
             WHERE 
               to_tsvector('english', content) @@ plainto_tsquery('english', ${query})
+              OR to_tsvector('simple', content) @@ plainto_tsquery('simple', ${query})
               OR to_tsvector('english', "lawName") @@ plainto_tsquery('english', ${query})
+              OR to_tsvector('simple', "lawName") @@ plainto_tsquery('simple', ${query})
               OR to_tsvector('english', "articleNumber") @@ plainto_tsquery('english', ${query})
+              OR to_tsvector('simple', "articleNumber") @@ plainto_tsquery('simple', ${query})
+              OR content ILIKE ANY (${terms}::text[])
+              OR "lawName" ILIKE ANY (${terms}::text[])
+              OR "articleNumber" ILIKE ANY (${terms}::text[])
             LIMIT ${limit}
           `;
 

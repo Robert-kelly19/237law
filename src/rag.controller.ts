@@ -10,6 +10,7 @@ import {
 import { RagService } from './rag.service';
 import { AskQueryDto, SearchQueryDto } from './rag-query.dto';
 import { LegalAgentService } from './agents/legal.agent';
+import { LLMResponseCacheService } from './cache/llm-response-cache.service';
 
 @Controller('rag')
 export class RagController {
@@ -18,6 +19,7 @@ export class RagController {
   constructor(
     private readonly ragService: RagService,
     private readonly legalAgent: LegalAgentService,
+    private readonly llmCacheService: LLMResponseCacheService,
   ) {}
 
   /**
@@ -38,6 +40,15 @@ export class RagController {
   async ask(@Body() askDto: AskQueryDto) {
     const answer = await this.ragService.askQuestion(askDto.query);
     return { answer };
+  }
+
+  /**
+   * Clear cached LLM answers after retrieval or prompt changes.
+   */
+  @Post('cache/clear')
+  clearCache() {
+    this.llmCacheService.clear();
+    return { success: true, message: 'LLM cache cleared' };
   }
 
   /**
@@ -83,14 +94,14 @@ export class RagController {
   private readonly reingestLock = { running: false };
 
   @Post('reingest-all')
-  async reingestAll() {
+  async reingestAll(@Body() body?: { force?: boolean }) {
     if (this.reingestLock.running) {
       return { success: false, message: 'Ingestion already running' };
     }
     this.reingestLock.running = true;
     try {
       this.logger.log('Manual re-ingestion triggered');
-      const result = await this.ragService.ingestPdfs();
+      const result = await this.ragService.ingestPdfs(Boolean(body?.force));
       return {
         success: true,
         ingested: result.ingested,

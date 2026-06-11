@@ -7,6 +7,26 @@ import { PDFParse } from 'pdf-parse';
 export class PdfService {
   private readonly logger = new Logger(PdfService.name);
 
+  private readonly friendlyLawNames: Record<string, string> = {
+    '2010-Ohada-General-Commercial-Law-en':
+      'OHADA Uniform Act on General Commercial Law',
+    AUPSRVE_English:
+      'OHADA Uniform Act on Simplified Recovery Procedures and Enforcement Measures',
+    Cameroon_Criminal_Procedure_Code_2005:
+      'Cameroon Criminal Procedure Code',
+    Cameroon_Labor_Code: 'Cameroon Labour Code',
+    Civil_Code_Cameroon: 'Cameroonian Civil Code',
+    'Civil Code': 'Cameroonian Civil Code',
+    Code_civil: 'Cameroonian Civil Code',
+    'Ohada-Uniform-Act-Cooperatives-en':
+      'OHADA Uniform Act on Cooperative Societies',
+    'Penal code eng original': 'Cameroonian Penal Code',
+    'The_Civil_Registration_System_Law': 'Civil Registration System Law',
+    The_constitution: 'Constitution of Cameroon',
+    'law_relating_to_cybersecurity_and_cybercriminality-1':
+      'Law Relating to Cybersecurity and Cybercriminality',
+  };
+
   /**
    * Reads all PDF files from /pdfs and extracts text safely
    */
@@ -66,7 +86,9 @@ export class PdfService {
    */
   chunkText(text: string, chunkSize = 500): string[] {
     // Split by sections first
-    const sections = text.split(/(?=(?:SECTION|ARTICLE|CHAPTER)\s+\d+)/i);
+    const sections = text.split(
+      /(?=(?:SECTION|ARTICLE|Article|Art\.|CHAPTER|Chapter)\s+[\dA-Za-z]+)/i,
+    );
 
     const chunks: string[] = [];
 
@@ -124,17 +146,30 @@ export class PdfService {
     source: string,
     chunkIndex: number,
   ): { lawName: string; articleNumber: string } {
-    const lawName = path.parse(source).name;
+    const lawName = this.getFriendlyLawName(source);
 
     // More aggressive section/article matching
     const articleMatch =
-      text.match(/(?:SECTION|Article)\s+(\d+)/i) ||
-      text.match(/(?:PART|Chapter)\s+([IVXLCDM]+)/i) ||
-      text.match(/(?:SECTION|Article)\s+([A-Z])/i);
+      text.match(/(?:SECTION|ARTICLE|Article|Art\.)\s+([\dA-Za-z]+)/i) ||
+      text.match(/(?:PART|Chapter)\s+([IVXLCDM]+)/i);
 
     return {
       lawName,
       articleNumber: articleMatch ? articleMatch[1] : `chunk-${chunkIndex}`,
     };
+  }
+
+  private getFriendlyLawName(source: string): string {
+    const baseName = path.parse(source).name;
+    const normalized = baseName.toLowerCase().replace(/[-_\s]+/g, ' ').trim();
+
+    if (
+      normalized.includes('civil code') ||
+      normalized.includes('code civil')
+    ) {
+      return 'Cameroonian Civil Code';
+    }
+
+    return this.friendlyLawNames[baseName] || baseName;
   }
 }
