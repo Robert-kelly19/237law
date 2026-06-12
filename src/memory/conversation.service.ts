@@ -242,8 +242,7 @@ export class ConversationService {
 
         // Check if tools used contains greeting_detector
         return (
-          isGreetingResponse ||
-          turn.toolsUsed?.includes('greeting_detector')
+          isGreetingResponse || turn.toolsUsed?.includes('greeting_detector')
         );
       });
     } catch (error: any) {
@@ -263,7 +262,11 @@ export class ConversationService {
     userId: string,
     sessionId: string,
   ): Promise<{
-    pattern: 'greeting_to_question' | 'question_only' | 'greeting_only' | 'other';
+    pattern:
+      | 'greeting_to_question'
+      | 'question_only'
+      | 'greeting_only'
+      | 'other';
     shouldSkipGreeting: boolean;
     previousTurnCount: number;
   }> {
@@ -286,9 +289,8 @@ export class ConversationService {
 
       // Check if previous turn was a greeting
       const previousTurn = recentTurns[recentTurns.length - 1];
-      const prevWasGreeting = previousTurn.toolsUsed?.includes(
-        'greeting_detector',
-      );
+      const prevWasGreeting =
+        previousTurn.toolsUsed?.includes('greeting_detector');
 
       if (prevWasGreeting) {
         return {

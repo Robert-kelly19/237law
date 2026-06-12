@@ -251,8 +251,7 @@ export class GreetingsService {
       ],
     };
 
-    const greetings =
-      followUpGreetings[language] || followUpGreetings.english;
+    const greetings = followUpGreetings[language] || followUpGreetings.english;
 
     return greetings[Math.floor(Math.random() * greetings.length)];
   }

@@ -214,7 +214,7 @@ export class RagService implements OnModuleInit {
     const sections = await this.searchRelevantSections(query);
 
     const dbStatus = await this.getIngestionStatus();
-    if (dbStatus.isEmpty) {
+    if (dbStatus.isEmpty || !sections || sections.length === 0) {
       return `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
@@ -311,12 +311,7 @@ Answer:
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
 
-    if (
-      !answer ||
-      answer.toLowerCase().includes('generally applies') ||
-      answer.toLowerCase().includes('not in the provided context') ||
-      answer.toLowerCase().includes('in general')
-    ) {
+    if (!answer) {
       return this.formatAnswer(fallback);
     }
 

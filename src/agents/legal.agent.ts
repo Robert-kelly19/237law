@@ -129,9 +129,8 @@ export class LegalAgentService {
               `User already greeted recently, skipping greeting response`,
             );
 
-            const followUpGreeting = this.greetingsService.getFollowUpGreeting(
-              detectedLanguage,
-            );
+            const followUpGreeting =
+              this.greetingsService.getFollowUpGreeting(detectedLanguage);
 
             // Use follow-up greeting instead of formal greeting
             return {
@@ -164,7 +163,9 @@ export class LegalAgentService {
               detectedGreetingLanguage,
               query.userId,
             );
-            this.logger.debug(`First greeting detected, returning: ${greeting}`);
+            this.logger.debug(
+              `First greeting detected, returning: ${greeting}`,
+            );
 
             return {
               answer: greeting,
@@ -191,10 +192,7 @@ export class LegalAgentService {
         }
 
         // If text has greeting + legal intent, skip greeting response
-        if (
-          this.languageDetection.isGreeting(query.query) &&
-          hasLegalIntent
-        ) {
+        if (this.languageDetection.isGreeting(query.query) && hasLegalIntent) {
           this.logger.debug(
             `Greeting with legal intent detected, proceeding to legal processing`,
           );
@@ -600,19 +598,7 @@ Answer:
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
 
-        const isUsableAnswer =
-          originalAnswer.length > 0 &&
-          !originalAnswer.toLowerCase().includes('generally applies') &&
-          !originalAnswer
-            .toLowerCase()
-            .includes('not in the provided context') &&
-          !originalAnswer.toLowerCase().includes('in general') &&
-          !originalAnswer
-            .toLowerCase()
-            .includes('no clear legal provision was found') &&
-          !originalAnswer
-            .toLowerCase()
-            .includes('please consult a qualified cameroonian lawyer');
+        const isUsableAnswer = originalAnswer.length > 0;
 
         if (isUsableAnswer) {
           answer = originalAnswer;
