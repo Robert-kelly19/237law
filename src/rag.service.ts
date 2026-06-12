@@ -213,7 +213,8 @@ export class RagService implements OnModuleInit {
   async askQuestion(query: string): Promise<string> {
     const sections = await this.searchRelevantSections(query);
 
-    if (!sections.length) {
+    const dbStatus = await this.getIngestionStatus();
+    if (dbStatus.isEmpty) {
       return `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.

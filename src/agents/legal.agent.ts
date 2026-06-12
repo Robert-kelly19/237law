@@ -606,7 +606,13 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
           !originalAnswer
             .toLowerCase()
             .includes('not in the provided context') &&
-          !originalAnswer.toLowerCase().includes('in general');
+          !originalAnswer.toLowerCase().includes('in general') &&
+          !originalAnswer
+            .toLowerCase()
+            .includes('no clear legal provision was found') &&
+          !originalAnswer
+            .toLowerCase()
+            .includes('please consult a qualified cameroonian lawyer');
 
         if (isUsableAnswer) {
           answer = originalAnswer;
