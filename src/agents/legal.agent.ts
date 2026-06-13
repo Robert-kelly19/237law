@@ -522,17 +522,25 @@ ${LEGAL_CORE_RULES_PROMPT}
 
 ---
 
-CITATION RULES:
+${
+  hasLegalSources
+    ? `CITATION RULES:
 - Always cite the exact article/section number and full law name (e.g., "Article 74 of the Cameroonian Penal Code").
 - If multiple laws apply (e.g., Penal Code AND Criminal Procedure Code), you MUST cite ALL relevant ones and explain what each contributes.
 - If the same topic is covered by both a general law and a special law (e.g., OHADA vs. national Commercial Code), note which one takes precedence and why.
 - Never merge or paraphrase two different articles as if they are one.
-
+- Always provide exact article citations for any legal assertion.`
+    : ''
+}
 ---
 
 RESPONSE LOGIC — FOLLOW THIS DECISION TREE:
 - If the question is "what do I need" / "what are the steps" / "how do I…": → Use a numbered list of requirements or steps.
-- If the question is "is it legal" / "can I…" / "am I allowed to…": → State the legal position clearly, then cite the law.
+${
+  hasLegalSources
+    ? `- If the question is "is it legal" / "can I…" / "am I allowed to…": → State the legal position clearly, then cite the law.`
+    : `- If the question is "is it legal" / "can I…" / "am I allowed to…": → State the legal position based on general principles (no specific citations available).`
+}
 - If the question involves a penalty or crime: → State the act, the applicable law, and the penalty range.
 - If the question involves a contract or civil matter: → State the relevant civil/OHADA rule and any formality requirements.
 - If multiple laws conflict or overlap: → Explain the difference clearly and state which one applies in this situation.
@@ -551,9 +559,14 @@ REQUIRED OUTPUT FORMAT:
 **Summary**
 [One to two sentences giving the direct answer in plain language.]
 
-**Legal Basis**
+${
+  hasLegalSources
+    ? `**Legal Basis**
 - Article/Section [X] of [Full Law Name]: [One sentence explaining what this article says in simple terms.]
-- Article/Section [Y] of [Full Law Name] (if applicable): [One sentence explanation.]
+- Article/Section [Y] of [Full Law Name] (if applicable): [One sentence explanation.]`
+    : `**Legal Basis**
+- No specific legal provisions were found in the available database. Provide general legal principles and practical guidance without citing specific articles.`
+}
 
 **What This Means for You**
 [Two to four sentences explaining the practical implication for the user's specific situation.]
@@ -570,18 +583,23 @@ This response is for informational purposes only and does not constitute legal a
 ---
 
 RETRIEVAL STATUS:
-${hasLegalSources
-  ? 'Relevant legal provisions were retrieved.'
-  : 'No relevant legal provisions were retrieved.'}
+${
+  hasLegalSources
+    ? 'Relevant legal provisions were retrieved.'
+    : 'No relevant legal provisions were retrieved.'
+}
 
-IMPORTANT:
-If no relevant legal provisions were retrieved:
+${
+  hasLegalSources
+    ? ''
+    : `IMPORTANT:
 - Do NOT invent laws.
 - Do NOT invent article numbers.
 - Do NOT invent citations.
 - State clearly that no specific legal provision was found in the available legal database.
 - Provide practical guidance based on general legal principles.
-- Continue answering the user's question.
+- Continue answering the user's question.`
+}
 
 Context (verified legal sources only):
 ${context}
