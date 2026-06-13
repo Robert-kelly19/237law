@@ -480,25 +480,24 @@ export class LegalAgentService {
         'keyword_search',
       ]);
       const cachedResponse = this.llmCacheService.get(cacheKey);
-
       let answer: string;
 
-      if (unique.length === 0) {
-        answer = `Sorry, I couldn't find a clear legal answer for your question.
+      const hasLegalSources = unique.length > 0;
 
-NB: This response is provided for informational purposes only and does not constitute legal advice.
-For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-      } else if (cachedResponse) {
+      if (cachedResponse) {
         this.logger.debug(
           `LLM response cache hit for query: ${query.substring(0, 50)}...`,
         );
         answer = cachedResponse;
       } else {
-        const context = unique
-          .map(
-            (s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`,
-          )
-          .join('\n\n');
+        const context = hasLegalSources
+          ? unique
+              .map(
+                (s) =>
+                  `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`,
+              )
+              .join('\n\n')
+          : 'No relevant legal provisions were retrieved from the legal database.';
 
         const languageInstructions =
           this.getLanguageInstructions(detectedLanguage);
@@ -569,6 +568,20 @@ REQUIRED OUTPUT FORMAT:
 This response is for informational purposes only and does not constitute legal advice. For proper legal assistance tailored to your situation, please consult a qualified Cameroonian lawyer.
 
 ---
+
+RETRIEVAL STATUS:
+${hasLegalSources
+  ? 'Relevant legal provisions were retrieved.'
+  : 'No relevant legal provisions were retrieved.'}
+
+IMPORTANT:
+If no relevant legal provisions were retrieved:
+- Do NOT invent laws.
+- Do NOT invent article numbers.
+- Do NOT invent citations.
+- State clearly that no specific legal provision was found in the available legal database.
+- Provide practical guidance based on general legal principles.
+- Continue answering the user's question.
 
 Context (verified legal sources only):
 ${context}
