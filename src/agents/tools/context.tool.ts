@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { MemoryService } from '../../memory/memory.service';
+import { EmbeddingService } from '../../embedding.service';
 
 export interface ToolResult {
   success: boolean;
@@ -15,6 +16,7 @@ export class ContextTool {
   constructor(
     private prisma: PrismaService,
     private memoryService: MemoryService,
+    private embeddingService: EmbeddingService,
   ) {}
 
   /**
@@ -173,12 +175,29 @@ export class ContextTool {
         `Storing semantic context: ${params.memoryType} - ${params.key}`,
       );
 
+      let embedding: number[] | undefined;
+      try {
+        const memoryText = [
+          params.memoryType,
+          params.key,
+          JSON.stringify(params.content),
+        ].join('\n');
+        embedding = await this.embeddingService.generateQueryEmbedding(
+          memoryText,
+        );
+      } catch (error: any) {
+        this.logger.warn(
+          `Semantic memory embedding failed, storing without vector: ${error.message}`,
+        );
+      }
+
       const memory = await this.memoryService.storeSemanticMemory({
         userId: params.userId,
         memoryType: params.memoryType,
         key: params.key,
         content: params.content,
         importance: params.importance,
+        embedding,
       });
 
       return {
@@ -261,9 +280,19 @@ export class ContextTool {
         sessionId,
         conversationLength: conversationHistory.length,
 
-        recentQueries: conversationHistory.map((t) => t.userQuery),
+        recentTurns: conversationHistory.map((turn) => ({
+          query: turn.userQuery,
+          response: this.truncateText(turn.response, 350),
+          topic: turn.agentThought?.topic,
+          lawSectionsRef: turn.lawSectionsRef,
+          createdAt: turn.createdAt,
+        })),
 
-        topicsOfInterest: recentTopics.map((t) => t.key),
+        topicsOfInterest: recentTopics.map((topic) => ({
+          key: topic.key,
+          importance: topic.importance,
+          content: topic.content,
+        })),
 
         lastInteraction:
           conversationHistory[conversationHistory.length - 1]?.createdAt,
@@ -286,5 +315,13 @@ export class ContextTool {
         reasoning: `Failed building summary: ${error.message}`,
       };
     }
+  }
+
+  private truncateText(text: string, maxLength: number): string {
+    if (!text || text.length <= maxLength) {
+      return text;
+    }
+
+    return `${text.slice(0, maxLength).trim()}...`;
   }
 }

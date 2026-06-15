@@ -22,6 +22,7 @@ interface StoreSemanticMemoryParams {
   key: string;
   content: Record<string, any>;
   importance?: number;
+  embedding?: number[];
 }
 
 interface ConversationHistoryOptions {
@@ -37,6 +38,10 @@ export class MemoryService {
   private readonly logger = new Logger(MemoryService.name);
 
   constructor(private prisma: PrismaService) {}
+
+  private vectorToLiteral(embedding: number[]): string {
+    return `[${embedding.join(',')}]`;
+  }
 
   /**
    * Store a conversation turn with agent reasoning and tool usage
@@ -76,6 +81,28 @@ export class MemoryService {
    */
   async storeSemanticMemory(params: StoreSemanticMemoryParams): Promise<any> {
     try {
+      if (params.embedding?.length) {
+        const vector = this.vectorToLiteral(params.embedding);
+        const memories = await this.prisma.$queryRaw`
+          INSERT INTO semantic_memory ("userId","memoryType","key",content,importance,embedding)
+          VALUES (
+            ${params.userId},
+            ${params.memoryType},
+            ${params.key},
+            ${JSON.stringify(params.content)},
+            ${params.importance || 1},
+            ${vector}::vector(1536)
+          )
+          RETURNING id,"userId","memoryType","key",content,importance,"createdAt","lastAccessed"
+        `;
+
+        const semanticMemory = Array.isArray(memories) ? memories[0] : memories;
+        this.logger.debug(
+          `Stored semantic memory: ${semanticMemory.id} for user: ${params.userId}`,
+        );
+        return semanticMemory;
+      }
+
       const semanticMemory = await this.prisma.semanticMemory.create({
         data: {
           userId: params.userId,

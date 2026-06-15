@@ -55,6 +55,25 @@ type ToolExecutionResult = {
   overallConfidence: number;
 };
 
+type ConversationMemoryContext = {
+  userId?: string;
+  sessionId?: string;
+  conversationLength?: number;
+  recentTurns?: Array<{
+    query: string;
+    response: string;
+    topic?: string;
+    lawSectionsRef?: string[];
+    createdAt?: Date | string;
+  }>;
+  topicsOfInterest?: Array<{
+    key: string;
+    importance?: number;
+    content?: Record<string, any>;
+  }>;
+  lastInteraction?: Date | string;
+};
+
 @Injectable()
 export class LegalAgentService {
   private readonly logger = new Logger(LegalAgentService.name);
@@ -132,6 +151,19 @@ export class LegalAgentService {
               detectedLanguage,
             );
 
+            await this.storeAgentTurn({
+              userId: query.userId,
+              sessionId,
+              userQuery: query.query,
+              response: followUpGreeting,
+              toolsUsed: ['greeting_skip_detector'],
+              agentThought: {
+                confidence: 1.0,
+                topic: 'greeting',
+                greetingSkipped: true,
+              },
+            });
+
             // Use follow-up greeting instead of formal greeting
             return {
               answer: followUpGreeting,
@@ -164,6 +196,19 @@ export class LegalAgentService {
               query.userId,
             );
             this.logger.debug(`First greeting detected, returning: ${greeting}`);
+
+            await this.storeAgentTurn({
+              userId: query.userId,
+              sessionId,
+              userQuery: query.query,
+              response: greeting,
+              toolsUsed: ['greeting_detector'],
+              agentThought: {
+                confidence: 1.0,
+                topic: 'greeting',
+                language: detectedGreetingLanguage,
+              },
+            });
 
             return {
               answer: greeting,
@@ -263,7 +308,12 @@ export class LegalAgentService {
         const synthesis = await this.performanceTracker.track(
           'synthesizeResults',
           () =>
-            this.synthesizeResults(query.query, toolResults, detectedLanguage),
+            this.synthesizeResults(
+              query.query,
+              toolResults,
+              detectedLanguage,
+              context.data,
+            ),
         );
 
         addReasoningStep({
@@ -276,18 +326,14 @@ export class LegalAgentService {
 
         // STEP 7 & 8: PARALLELIZE conversation storage and semantic memory
         // These can happen in the background and don't block the response
-        const turnNumber = await this.performanceTracker.track(
-          'getNextTurnNumber',
-          () => this.conversationService.getNextTurnNumber(sessionId),
-        );
+        const topic = this.extractTopic(query.query);
 
         // Store conversation and semantic memory in parallel
         // (fire and forget - don't wait for completion as they're not critical for response)
         Promise.all([
-          this.memoryService.storeConversation({
+          this.storeAgentTurn({
             userId: query.userId,
             sessionId,
-            turnNumber,
             userQuery: query.query,
             response: synthesis.answer,
             toolsUsed: synthesis.toolsUsed,
@@ -295,17 +341,19 @@ export class LegalAgentService {
             agentThought: {
               confidence: analysis.confidence,
               reasoning: reasoningSteps,
-              topic: this.extractTopic(query.query),
+              topic,
             },
           }),
           this.contextTool.storeSemanticContext({
             userId: query.userId,
-            memoryType: 'user_preference',
-            key: 'legal_query',
+            memoryType: 'topic',
+            key: topic,
             content: {
               query: query.query,
               timestamp: new Date().toISOString(),
               language: detectedLanguage,
+              citedArticles: synthesis.citedArticles,
+              answerPreview: synthesis.answer.slice(0, 500),
             },
             importance: 3,
           }),
@@ -421,6 +469,7 @@ export class LegalAgentService {
     query: string,
     toolResults: ToolExecutionResult,
     detectedLanguage?: string,
+    memoryContext?: ConversationMemoryContext | null,
   ): Promise<{
     answer: string;
     citations: any[];
@@ -436,8 +485,10 @@ export class LegalAgentService {
       );
 
       // Check LLM response cache
+      const memoryPrompt = this.buildConversationMemoryPrompt(memoryContext);
       const cacheKey = this.llmCacheService.generateKey(query, [
         'semantic_search',
+        this.buildMemoryFingerprint(memoryContext),
       ]);
       const cachedResponse = this.llmCacheService.get(cacheKey);
 
@@ -538,6 +589,9 @@ This response is for informational purposes only and does not constitute legal a
 Context (verified legal sources only):
 ${context}
 
+Conversation Memory (for continuity only; do not cite this as law):
+${memoryPrompt}
+
 User Question:
 ${query}
 
@@ -580,6 +634,89 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
         relatedArticles: [],
       };
     });
+  }
+
+  private async storeAgentTurn(params: {
+    userId: string;
+    sessionId: string;
+    userQuery: string;
+    response: string;
+    toolsUsed?: string[];
+    lawSectionsRef?: string[];
+    agentThought?: Record<string, any>;
+  }): Promise<void> {
+    try {
+      const turnNumber = await this.performanceTracker.track(
+        'getNextTurnNumber',
+        () => this.conversationService.getNextTurnNumber(params.sessionId),
+      );
+
+      await this.memoryService.storeConversation({
+        ...params,
+        turnNumber,
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to store agent turn: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  private buildConversationMemoryPrompt(
+    memoryContext?: ConversationMemoryContext | null,
+  ): string {
+    if (!memoryContext) {
+      return 'No prior conversation memory is available.';
+    }
+
+    const recentTurns = memoryContext.recentTurns || [];
+    const topics = memoryContext.topicsOfInterest || [];
+
+    if (recentTurns.length === 0 && topics.length === 0) {
+      return 'No prior conversation memory is available.';
+    }
+
+    const recentTurnLines = recentTurns
+      .map((turn, index) => {
+        const topic = turn.topic ? ` Topic: ${turn.topic}.` : '';
+        return `${index + 1}. User asked: "${turn.query}"${topic} Assistant answered: "${turn.response}"`;
+      })
+      .join('\n');
+
+    const topicLines = topics
+      .map((topic) => {
+        const lastQuery =
+          typeof topic.content?.query === 'string'
+            ? ` Last related query: "${topic.content.query}"`
+            : '';
+        return `- ${topic.key} (importance ${topic.importance || 1}).${lastQuery}`;
+      })
+      .join('\n');
+
+    return [
+      recentTurnLines ? `Recent turns:\n${recentTurnLines}` : '',
+      topicLines ? `Known user topics:\n${topicLines}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  private buildMemoryFingerprint(
+    memoryContext?: ConversationMemoryContext | null,
+  ): string {
+    if (!memoryContext) {
+      return 'memory:none';
+    }
+
+    const recentQueries = (memoryContext.recentTurns || [])
+      .map((turn) => turn.query)
+      .join('|');
+    const topics = (memoryContext.topicsOfInterest || [])
+      .map((topic) => topic.key)
+      .join('|');
+
+    return `memory:${memoryContext.conversationLength || 0}:${recentQueries}:${topics}`;
   }
 
   /**
