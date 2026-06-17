@@ -49,10 +49,16 @@ interface ReasoningStep {
 }
 
 type ToolExecutionResult = {
-  searchResults: LawArticle[];
-  semanticResults: LawArticle[];
+  mergedResults: LawArticle[];
   crossReferences: LawArticle[];
   overallConfidence: number;
+};
+
+type QueryDomain = {
+  name: string;
+  confidence: number;
+  sources: string[];
+  matchedKeywords: string[];
 };
 
 type ConversationMemoryContext = {
@@ -147,9 +153,8 @@ export class LegalAgentService {
               `User already greeted recently, skipping greeting response`,
             );
 
-            const followUpGreeting = this.greetingsService.getFollowUpGreeting(
-              detectedLanguage,
-            );
+            const followUpGreeting =
+              this.greetingsService.getFollowUpGreeting(detectedLanguage);
 
             await this.storeAgentTurn({
               userId: query.userId,
@@ -195,7 +200,9 @@ export class LegalAgentService {
               detectedGreetingLanguage,
               query.userId,
             );
-            this.logger.debug(`First greeting detected, returning: ${greeting}`);
+            this.logger.debug(
+              `First greeting detected, returning: ${greeting}`,
+            );
 
             await this.storeAgentTurn({
               userId: query.userId,
@@ -235,10 +242,7 @@ export class LegalAgentService {
         }
 
         // If text has greeting + legal intent, skip greeting response
-        if (
-          this.languageDetection.isGreeting(query.query) &&
-          hasLegalIntent
-        ) {
+        if (this.languageDetection.isGreeting(query.query) && hasLegalIntent) {
           this.logger.debug(
             `Greeting with legal intent detected, proceeding to legal processing`,
           );
@@ -277,9 +281,9 @@ export class LegalAgentService {
           confidence: 1.0,
         });
 
-        // STEP 4: Tool plan (always semantic-first RAG)
+        // STEP 4: Tool plan (domain-aware hybrid RAG)
         const toolPlan = this.performanceTracker.trackSync('plan_tools', () =>
-          this.planToolUsage(),
+          this.planToolUsage(query.query),
         );
 
         addReasoningStep({
@@ -414,17 +418,20 @@ export class LegalAgentService {
   }
 
   /**
-   * Always semantic-first tool planning
+   * Classify first, then search with both semantic and keyword retrieval.
    */
-  private planToolUsage(): {
+  private planToolUsage(query: string): {
     tools: string[];
     sequence: string;
+    domain: QueryDomain;
   } {
-    const tools = ['search_semantic'];
+    const tools = ['search_semantic', 'search_keyword'];
+    const domain = this.classifyLegalDomain(query);
 
     return {
       tools,
       sequence: tools.join(' -> '),
+      domain,
     };
   }
 
@@ -436,30 +443,251 @@ export class LegalAgentService {
     query: string,
   ): Promise<ToolExecutionResult> {
     const results: ToolExecutionResult = {
-      searchResults: [],
-      semanticResults: [],
+      mergedResults: [],
       crossReferences: [],
       overallConfidence: 1.0,
     };
 
     try {
-      // Semantic search only
-      if (toolPlan.tools.includes('search_semantic')) {
-        const res = await this.lawSearchTool.searchByTopic(query, 5);
+      const domain = toolPlan.domain as QueryDomain | undefined;
+      const searchOptions = {
+        sources:
+          domain && domain.confidence >= 0.45 && domain.sources.length > 0
+            ? domain.sources
+            : undefined,
+        minSimilarity: 0.35,
+      };
 
-        if (res.success) {
-          results.semanticResults = res.data;
+      let semanticResults: LawArticle[] = [];
+      let keywordResults: LawArticle[] = [];
+
+      if (toolPlan.tools.includes('search_semantic')) {
+        const [semanticSearch, keywordSearch] = await Promise.all([
+          this.lawSearchTool.searchByTopic(query, 6, searchOptions),
+          toolPlan.tools.includes('search_keyword')
+            ? this.lawSearchTool.searchByKeyword(query, 6, searchOptions)
+            : Promise.resolve({ success: true, data: [], reasoning: '' }),
+        ]);
+
+        if (semanticSearch.success) {
+          semanticResults = semanticSearch.data;
+        }
+
+        if (keywordSearch.success) {
+          keywordResults = keywordSearch.data;
         }
       }
 
+      if (
+        searchOptions.sources?.length &&
+        semanticResults.length === 0 &&
+        keywordResults.length === 0
+      ) {
+        this.logger.debug(
+          `No filtered results for ${domain?.name}; retrying across all sources`,
+        );
+        const [semanticSearch, keywordSearch] = await Promise.all([
+          this.lawSearchTool.searchByTopic(query, 6, {
+            minSimilarity: searchOptions.minSimilarity,
+          }),
+          this.lawSearchTool.searchByKeyword(query, 6),
+        ]);
+
+        semanticResults = semanticSearch.success ? semanticSearch.data : [];
+        keywordResults = keywordSearch.success ? keywordSearch.data : [];
+      }
+
+      results.mergedResults = this.mergeSearchResults(
+        semanticResults,
+        keywordResults,
+        5,
+      );
+
       results.overallConfidence =
-        results.semanticResults.length > 0 ? 0.9 : 0.3;
+        results.mergedResults.length > 0 ? 0.9 : 0.3;
     } catch (error: any) {
       this.logger.error(error.message);
       results.overallConfidence = 0.6;
     }
 
     return results;
+  }
+
+  private classifyLegalDomain(query: string): QueryDomain {
+    const q = query.toLowerCase();
+    const domains: Array<Omit<QueryDomain, 'confidence' | 'matchedKeywords'>> =
+      [
+        {
+          name: 'cybersecurity law',
+          sources: ['law_relating_to_cybersecurity_and_cybercriminality-1.pdf'],
+        },
+        {
+          name: 'employment law',
+          sources: ['Cameroon_Labor_Code.pdf'],
+        },
+        {
+          name: 'criminal law',
+          sources: [
+            'Penal code eng original.pdf',
+            'Cameroon_Criminal_Procedure_Code_2005.pdf',
+          ],
+        },
+        {
+          name: 'criminal procedure',
+          sources: ['Cameroon_Criminal_Procedure_Code_2005.pdf'],
+        },
+        {
+          name: 'business law',
+          sources: [
+            '2010-Ohada-General-Commercial-Law-en.pdf',
+            'Ohada-Uniform-Act-Cooperatives-en.pdf',
+            'AUPSRVE_English.pdf',
+          ],
+        },
+        {
+          name: 'family and civil registration law',
+          sources: ['The_Civil_Registration_System_Law .pdf'],
+        },
+        {
+          name: 'constitutional law',
+          sources: ['The_constitution.pdf'],
+        },
+      ];
+
+    const keywords: Record<string, string[]> = {
+      'cybersecurity law': [
+        'cyber',
+        'hack',
+        'hacked',
+        'hacking',
+        'internet',
+        'online',
+        'data',
+        'password',
+        'account',
+        'computer',
+        'digital',
+        'electronic',
+        'phishing',
+        'scam',
+        'network',
+      ],
+      'employment law': [
+        'job',
+        'work',
+        'worker',
+        'employee',
+        'employer',
+        'salary',
+        'wage',
+        'dismiss',
+        'fire',
+        'fired',
+        'firing',
+        'termination',
+        'leave',
+        'boss',
+        'contract of employment',
+      ],
+      'criminal law': [
+        'crime',
+        'criminal',
+        'offence',
+        'penalty',
+        'fine',
+        'prison',
+        'jail',
+        'theft',
+        'assault',
+        'murder',
+        'rape',
+        'fraud',
+      ],
+      'criminal procedure': [
+        'arrest',
+        'warrant',
+        'bail',
+        'detention',
+        'police',
+        'investigation',
+        'custody',
+        'trial',
+        'appeal',
+      ],
+      'business law': [
+        'company',
+        'business',
+        'commercial',
+        'trader',
+        'trade',
+        'register',
+        'cooperative',
+        'startup',
+        'shareholder',
+        'debtor',
+        'creditor',
+        'insolvency',
+      ],
+      'family and civil registration law': [
+        'birth',
+        'death',
+        'marriage',
+        'certificate',
+        'civil status',
+        'registration',
+        'divorce',
+        'child',
+        'custody',
+      ],
+      'constitutional law': [
+        'constitution',
+        'constitutional',
+        'rights',
+        'freedom',
+        'president',
+        'parliament',
+        'election',
+      ],
+    };
+
+    const ranked = domains
+      .map((domain) => {
+        const matchedKeywords = keywords[domain.name].filter((keyword) =>
+          q.includes(keyword),
+        );
+
+        return {
+          ...domain,
+          matchedKeywords,
+          confidence: Math.min(matchedKeywords.length / 3, 1),
+        };
+      })
+      .sort((a, b) => b.confidence - a.confidence);
+
+    return (
+      ranked[0] || {
+        name: 'general legal inquiry',
+        confidence: 0,
+        sources: [],
+        matchedKeywords: [],
+      }
+    );
+  }
+
+  private mergeSearchResults(
+    semanticResults: LawArticle[],
+    keywordResults: LawArticle[],
+    limit: number,
+  ): LawArticle[] {
+    const merged = new Map<string, LawArticle>();
+
+    for (const result of [...keywordResults, ...semanticResults]) {
+      if (!merged.has(result.id)) {
+        merged.set(result.id, result);
+      }
+    }
+
+    return Array.from(merged.values()).slice(0, limit);
   }
 
   /**
@@ -478,7 +706,7 @@ export class LegalAgentService {
     relatedArticles: any[];
   }> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
-      const unique = toolResults.semanticResults;
+      const unique = toolResults.mergedResults;
 
       const citations = unique.map((a) =>
         this.citationTool.generateInlineCitation(a),
