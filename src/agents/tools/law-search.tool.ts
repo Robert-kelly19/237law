@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { EmbeddingService } from '../../embedding.service';
 import { PerformanceTrackerService } from '../../performance/performance-tracker.service';
@@ -16,6 +17,12 @@ export interface LawSearchResult {
   content: string;
   source: string;
   distance?: number;
+  score?: number;
+}
+
+export interface LawSearchOptions {
+  sources?: string[];
+  minSimilarity?: number;
 }
 
 @Injectable()
@@ -31,10 +38,15 @@ export class LawSearchTool {
   /**
    * Search law sections by keyword with performance tracking
    */
-  async searchByKeyword(query: string, limit: number = 5): Promise<ToolResult> {
+  async searchByKeyword(
+    query: string,
+    limit: number = 5,
+    options?: LawSearchOptions,
+  ): Promise<ToolResult> {
     return this.performanceTracker.track('searchByKeyword', async () => {
       try {
         this.logger.debug(`Searching by keyword: ${query} (limit: ${limit})`);
+        const sourceFilter = this.buildSourceFilter(options?.sources);
 
         // Full-text search using PostgreSQL
         const results = await this.prisma.$queryRaw<LawSearchResult[]>`
@@ -43,12 +55,20 @@ export class LawSearchTool {
               "lawName",
               "articleNumber",
               content,
-              source
+              source,
+              ts_rank(
+                to_tsvector('english', content || ' ' || "lawName" || ' ' || "articleNumber"),
+                plainto_tsquery('english', ${query})
+              ) as score
             FROM law_sections
             WHERE 
-              to_tsvector('english', content) @@ plainto_tsquery('english', ${query})
-              OR to_tsvector('english', "lawName") @@ plainto_tsquery('english', ${query})
-              OR to_tsvector('english', "articleNumber") @@ plainto_tsquery('english', ${query})
+              (
+                to_tsvector('english', content) @@ plainto_tsquery('english', ${query})
+                OR to_tsvector('english', "lawName") @@ plainto_tsquery('english', ${query})
+                OR to_tsvector('english', "articleNumber") @@ plainto_tsquery('english', ${query})
+              )
+              ${sourceFilter}
+            ORDER BY score DESC
             LIMIT ${limit}
           `;
 
@@ -74,10 +94,16 @@ export class LawSearchTool {
   /**
    * Search law sections by semantic similarity with performance tracking
    */
-  async searchByTopic(topic: string, limit: number = 5): Promise<ToolResult> {
+  async searchByTopic(
+    topic: string,
+    limit: number = 5,
+    options?: LawSearchOptions,
+  ): Promise<ToolResult> {
     return this.performanceTracker.track('searchByTopic', async () => {
       try {
         this.logger.debug(`Searching by topic: ${topic} (limit: ${limit})`);
+        const sourceFilter = this.buildSourceFilter(options?.sources);
+        const candidateLimit = Math.max(limit * 3, limit);
 
         // Generate embedding for the topic (with caching)
         const topicEmbedding =
@@ -93,14 +119,21 @@ export class LawSearchTool {
               source,
               1 - (embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector) as distance
             FROM law_sections
+            WHERE 1 = 1
+            ${sourceFilter}
             ORDER BY embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector
-            LIMIT ${limit}
+            LIMIT ${candidateLimit}
           `;
+
+        const minSimilarity = options?.minSimilarity ?? 0;
+        const relevantResults = results
+          .filter((result) => Number(result.distance) >= minSimilarity)
+          .slice(0, limit);
 
         return {
           success: true,
-          data: results,
-          reasoning: `Found ${results.length} law sections semantically similar to "${topic}"`,
+          data: relevantResults,
+          reasoning: `Found ${relevantResults.length} law sections semantically similar to "${topic}"`,
         };
       } catch (error: any) {
         this.logger.error(`Topic search failed: ${error.message}`, error.stack);
@@ -111,6 +144,17 @@ export class LawSearchTool {
         };
       }
     });
+  }
+
+  private buildSourceFilter(sources?: string[]): Prisma.Sql {
+    if (!sources?.length) {
+      return Prisma.empty;
+    }
+
+    const sourceClauses = sources.map(
+      (source) => Prisma.sql`source = ${source}`,
+    );
+    return Prisma.sql`AND (${Prisma.join(sourceClauses, ' OR ')})`;
   }
 
   /**
