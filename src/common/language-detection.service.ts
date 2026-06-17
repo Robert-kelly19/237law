@@ -11,10 +11,10 @@ export class LanguageDetectionService {
    */
   private readonly greetingPatterns: Record<DetectedLanguage, RegExp> = {
     english:
-      /\b(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
+      /\b(hi|hello|hey|greetings|yo|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
     french: /\b(bonjour|bonsoir|salut|ça\s+va|allô|coucou|hé)\b/i,
     pidgin:
-      /\b(howdy|wey\s+dey|hello|hey|alright|how\s+body|washer|how\s+na|wha\s+\w+|abi|innit)\b/i,
+      /\b(howdy|wey\s+dey|hello|hey|yo|alright|how\s+body|washer|how\s+na|wha\s+\w+|abi|innit)\b/i,
     unknown: /(?!)/,
   };
 
@@ -23,11 +23,11 @@ export class LanguageDetectionService {
    */
   private readonly languageIndicators: Record<DetectedLanguage, RegExp> = {
     english:
-      /\b(hi|hello|hey|greetings|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
+      /\b(hi|hello|hey|greetings|yo|good\s+(morning|afternoon|evening|night)|what\'s\s+up|sup|howdy)\b/i,
     french:
       /\b(le|la|les|un|une|des|et|est|sont|je|tu|il|elle|nous|vous|ils|elles|qui|que|quoi|où|quand|pourquoi|comment|s'il\s+vous\s+plaît|merci|oui|non)\b/i,
     pidgin:
-      /\b(dey|wey|no\s+be|abi|eh|innit|masa|sef|o|o\s+lord|aunty|bro|fam|bruv|mandem|wallahi|alhamdulillah|walloh)\b/i,
+      /\b(dey|wey|no\s+be|abi|eh|innit|yo|masa|sef|o|o\s+lord|aunty|bro|fam|bruv|man dem|wallahi|alhamdulillah|walloh)\b/i,
     unknown: /(?!)/,
   };
 

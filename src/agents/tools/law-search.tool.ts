@@ -16,7 +16,7 @@ export interface LawSearchResult {
   articleNumber: string;
   content: string;
   source: string;
-  distance?: number;
+  similarity?: number;
   score?: number;
 }
 
@@ -117,7 +117,7 @@ export class LawSearchTool {
               "articleNumber",
               content,
               source,
-              1 - (embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector) as distance
+              1 - (embedding <=> ${`[${topicEmbedding.join(',')}]`}::vector) as similarity
             FROM law_sections
             WHERE 1 = 1
             ${sourceFilter}
@@ -127,7 +127,7 @@ export class LawSearchTool {
 
         const minSimilarity = options?.minSimilarity ?? 0;
         const relevantResults = results
-          .filter((result) => Number(result.distance) >= minSimilarity)
+          .filter((result) => Number(result.similarity) >= minSimilarity)
           .slice(0, limit);
 
         return {

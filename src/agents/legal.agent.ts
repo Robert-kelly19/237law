@@ -49,8 +49,7 @@ interface ReasoningStep {
 }
 
 type ToolExecutionResult = {
-  searchResults: LawArticle[];
-  semanticResults: LawArticle[];
+  mergedResults: LawArticle[];
   crossReferences: LawArticle[];
   overallConfidence: number;
 };
@@ -444,8 +443,7 @@ export class LegalAgentService {
     query: string,
   ): Promise<ToolExecutionResult> {
     const results: ToolExecutionResult = {
-      searchResults: [],
-      semanticResults: [],
+      mergedResults: [],
       crossReferences: [],
       overallConfidence: 1.0,
     };
@@ -499,15 +497,14 @@ export class LegalAgentService {
         keywordResults = keywordSearch.success ? keywordSearch.data : [];
       }
 
-      results.semanticResults = this.mergeSearchResults(
+      results.mergedResults = this.mergeSearchResults(
         semanticResults,
         keywordResults,
         5,
       );
-      results.searchResults = keywordResults;
 
       results.overallConfidence =
-        results.semanticResults.length > 0 ? 0.9 : 0.3;
+        results.mergedResults.length > 0 ? 0.9 : 0.3;
     } catch (error: any) {
       this.logger.error(error.message);
       results.overallConfidence = 0.6;
@@ -709,7 +706,7 @@ export class LegalAgentService {
     relatedArticles: any[];
   }> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
-      const unique = toolResults.semanticResults;
+      const unique = toolResults.mergedResults;
 
       const citations = unique.map((a) =>
         this.citationTool.generateInlineCitation(a),
