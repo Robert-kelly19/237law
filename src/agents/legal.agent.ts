@@ -49,35 +49,10 @@ interface ReasoningStep {
 }
 
 type ToolExecutionResult = {
-  mergedResults: LawArticle[];
+  searchResults: LawArticle[];
+  semanticResults: LawArticle[];
   crossReferences: LawArticle[];
   overallConfidence: number;
-};
-
-type QueryDomain = {
-  name: string;
-  confidence: number;
-  sources: string[];
-  matchedKeywords: string[];
-};
-
-type ConversationMemoryContext = {
-  userId?: string;
-  sessionId?: string;
-  conversationLength?: number;
-  recentTurns?: Array<{
-    query: string;
-    response: string;
-    topic?: string;
-    lawSectionsRef?: string[];
-    createdAt?: Date | string;
-  }>;
-  topicsOfInterest?: Array<{
-    key: string;
-    importance?: number;
-    content?: Record<string, any>;
-  }>;
-  lastInteraction?: Date | string;
 };
 
 @Injectable()
@@ -153,21 +128,9 @@ export class LegalAgentService {
               `User already greeted recently, skipping greeting response`,
             );
 
-            const followUpGreeting =
-              this.greetingsService.getFollowUpGreeting(detectedLanguage);
-
-            await this.storeAgentTurn({
-              userId: query.userId,
-              sessionId,
-              userQuery: query.query,
-              response: followUpGreeting,
-              toolsUsed: ['greeting_skip_detector'],
-              agentThought: {
-                confidence: 1.0,
-                topic: 'greeting',
-                greetingSkipped: true,
-              },
-            });
+            const followUpGreeting = this.greetingsService.getFollowUpGreeting(
+              detectedLanguage,
+            );
 
             // Use follow-up greeting instead of formal greeting
             return {
@@ -200,22 +163,7 @@ export class LegalAgentService {
               detectedGreetingLanguage,
               query.userId,
             );
-            this.logger.debug(
-              `First greeting detected, returning: ${greeting}`,
-            );
-
-            await this.storeAgentTurn({
-              userId: query.userId,
-              sessionId,
-              userQuery: query.query,
-              response: greeting,
-              toolsUsed: ['greeting_detector'],
-              agentThought: {
-                confidence: 1.0,
-                topic: 'greeting',
-                language: detectedGreetingLanguage,
-              },
-            });
+            this.logger.debug(`First greeting detected, returning: ${greeting}`);
 
             return {
               answer: greeting,
@@ -242,7 +190,10 @@ export class LegalAgentService {
         }
 
         // If text has greeting + legal intent, skip greeting response
-        if (this.languageDetection.isGreeting(query.query) && hasLegalIntent) {
+        if (
+          this.languageDetection.isGreeting(query.query) &&
+          hasLegalIntent
+        ) {
           this.logger.debug(
             `Greeting with legal intent detected, proceeding to legal processing`,
           );
@@ -281,9 +232,9 @@ export class LegalAgentService {
           confidence: 1.0,
         });
 
-        // STEP 4: Tool plan (domain-aware hybrid RAG)
+        // STEP 4: Tool plan (always semantic-first RAG)
         const toolPlan = this.performanceTracker.trackSync('plan_tools', () =>
-          this.planToolUsage(query.query),
+          this.planToolUsage(),
         );
 
         addReasoningStep({
@@ -312,12 +263,7 @@ export class LegalAgentService {
         const synthesis = await this.performanceTracker.track(
           'synthesizeResults',
           () =>
-            this.synthesizeResults(
-              query.query,
-              toolResults,
-              detectedLanguage,
-              context.data,
-            ),
+            this.synthesizeResults(query.query, toolResults, detectedLanguage),
         );
 
         addReasoningStep({
@@ -330,14 +276,18 @@ export class LegalAgentService {
 
         // STEP 7 & 8: PARALLELIZE conversation storage and semantic memory
         // These can happen in the background and don't block the response
-        const topic = this.extractTopic(query.query);
+        const turnNumber = await this.performanceTracker.track(
+          'getNextTurnNumber',
+          () => this.conversationService.getNextTurnNumber(sessionId),
+        );
 
         // Store conversation and semantic memory in parallel
         // (fire and forget - don't wait for completion as they're not critical for response)
         Promise.all([
-          this.storeAgentTurn({
+          this.memoryService.storeConversation({
             userId: query.userId,
             sessionId,
+            turnNumber,
             userQuery: query.query,
             response: synthesis.answer,
             toolsUsed: synthesis.toolsUsed,
@@ -345,19 +295,17 @@ export class LegalAgentService {
             agentThought: {
               confidence: analysis.confidence,
               reasoning: reasoningSteps,
-              topic,
+              topic: this.extractTopic(query.query),
             },
           }),
           this.contextTool.storeSemanticContext({
             userId: query.userId,
-            memoryType: 'topic',
-            key: topic,
+            memoryType: 'user_preference',
+            key: 'legal_query',
             content: {
               query: query.query,
               timestamp: new Date().toISOString(),
               language: detectedLanguage,
-              citedArticles: synthesis.citedArticles,
-              answerPreview: synthesis.answer.slice(0, 500),
             },
             importance: 3,
           }),
@@ -418,20 +366,17 @@ export class LegalAgentService {
   }
 
   /**
-   * Classify first, then search with both semantic and keyword retrieval.
+   * Always semantic-first tool planning
    */
-  private planToolUsage(query: string): {
+  private planToolUsage(): {
     tools: string[];
     sequence: string;
-    domain: QueryDomain;
   } {
-    const tools = ['search_semantic', 'search_keyword'];
-    const domain = this.classifyLegalDomain(query);
+    const tools = ['search_semantic'];
 
     return {
       tools,
       sequence: tools.join(' -> '),
-      domain,
     };
   }
 
@@ -443,251 +388,30 @@ export class LegalAgentService {
     query: string,
   ): Promise<ToolExecutionResult> {
     const results: ToolExecutionResult = {
-      mergedResults: [],
+      searchResults: [],
+      semanticResults: [],
       crossReferences: [],
       overallConfidence: 1.0,
     };
 
     try {
-      const domain = toolPlan.domain as QueryDomain | undefined;
-      const searchOptions = {
-        sources:
-          domain && domain.confidence >= 0.45 && domain.sources.length > 0
-            ? domain.sources
-            : undefined,
-        minSimilarity: 0.35,
-      };
-
-      let semanticResults: LawArticle[] = [];
-      let keywordResults: LawArticle[] = [];
-
+      // Semantic search only
       if (toolPlan.tools.includes('search_semantic')) {
-        const [semanticSearch, keywordSearch] = await Promise.all([
-          this.lawSearchTool.searchByTopic(query, 6, searchOptions),
-          toolPlan.tools.includes('search_keyword')
-            ? this.lawSearchTool.searchByKeyword(query, 6, searchOptions)
-            : Promise.resolve({ success: true, data: [], reasoning: '' }),
-        ]);
+        const res = await this.lawSearchTool.searchByTopic(query, 5);
 
-        if (semanticSearch.success) {
-          semanticResults = semanticSearch.data;
-        }
-
-        if (keywordSearch.success) {
-          keywordResults = keywordSearch.data;
+        if (res.success) {
+          results.semanticResults = res.data;
         }
       }
-
-      if (
-        searchOptions.sources?.length &&
-        semanticResults.length === 0 &&
-        keywordResults.length === 0
-      ) {
-        this.logger.debug(
-          `No filtered results for ${domain?.name}; retrying across all sources`,
-        );
-        const [semanticSearch, keywordSearch] = await Promise.all([
-          this.lawSearchTool.searchByTopic(query, 6, {
-            minSimilarity: searchOptions.minSimilarity,
-          }),
-          this.lawSearchTool.searchByKeyword(query, 6),
-        ]);
-
-        semanticResults = semanticSearch.success ? semanticSearch.data : [];
-        keywordResults = keywordSearch.success ? keywordSearch.data : [];
-      }
-
-      results.mergedResults = this.mergeSearchResults(
-        semanticResults,
-        keywordResults,
-        5,
-      );
 
       results.overallConfidence =
-        results.mergedResults.length > 0 ? 0.9 : 0.3;
+        results.semanticResults.length > 0 ? 0.9 : 0.3;
     } catch (error: any) {
       this.logger.error(error.message);
       results.overallConfidence = 0.6;
     }
 
     return results;
-  }
-
-  private classifyLegalDomain(query: string): QueryDomain {
-    const q = query.toLowerCase();
-    const domains: Array<Omit<QueryDomain, 'confidence' | 'matchedKeywords'>> =
-      [
-        {
-          name: 'cybersecurity law',
-          sources: ['law_relating_to_cybersecurity_and_cybercriminality-1.pdf'],
-        },
-        {
-          name: 'employment law',
-          sources: ['Cameroon_Labor_Code.pdf'],
-        },
-        {
-          name: 'criminal law',
-          sources: [
-            'Penal code eng original.pdf',
-            'Cameroon_Criminal_Procedure_Code_2005.pdf',
-          ],
-        },
-        {
-          name: 'criminal procedure',
-          sources: ['Cameroon_Criminal_Procedure_Code_2005.pdf'],
-        },
-        {
-          name: 'business law',
-          sources: [
-            '2010-Ohada-General-Commercial-Law-en.pdf',
-            'Ohada-Uniform-Act-Cooperatives-en.pdf',
-            'AUPSRVE_English.pdf',
-          ],
-        },
-        {
-          name: 'family and civil registration law',
-          sources: ['The_Civil_Registration_System_Law .pdf'],
-        },
-        {
-          name: 'constitutional law',
-          sources: ['The_constitution.pdf'],
-        },
-      ];
-
-    const keywords: Record<string, string[]> = {
-      'cybersecurity law': [
-        'cyber',
-        'hack',
-        'hacked',
-        'hacking',
-        'internet',
-        'online',
-        'data',
-        'password',
-        'account',
-        'computer',
-        'digital',
-        'electronic',
-        'phishing',
-        'scam',
-        'network',
-      ],
-      'employment law': [
-        'job',
-        'work',
-        'worker',
-        'employee',
-        'employer',
-        'salary',
-        'wage',
-        'dismiss',
-        'fire',
-        'fired',
-        'firing',
-        'termination',
-        'leave',
-        'boss',
-        'contract of employment',
-      ],
-      'criminal law': [
-        'crime',
-        'criminal',
-        'offence',
-        'penalty',
-        'fine',
-        'prison',
-        'jail',
-        'theft',
-        'assault',
-        'murder',
-        'rape',
-        'fraud',
-      ],
-      'criminal procedure': [
-        'arrest',
-        'warrant',
-        'bail',
-        'detention',
-        'police',
-        'investigation',
-        'custody',
-        'trial',
-        'appeal',
-      ],
-      'business law': [
-        'company',
-        'business',
-        'commercial',
-        'trader',
-        'trade',
-        'register',
-        'cooperative',
-        'startup',
-        'shareholder',
-        'debtor',
-        'creditor',
-        'insolvency',
-      ],
-      'family and civil registration law': [
-        'birth',
-        'death',
-        'marriage',
-        'certificate',
-        'civil status',
-        'registration',
-        'divorce',
-        'child',
-        'custody',
-      ],
-      'constitutional law': [
-        'constitution',
-        'constitutional',
-        'rights',
-        'freedom',
-        'president',
-        'parliament',
-        'election',
-      ],
-    };
-
-    const ranked = domains
-      .map((domain) => {
-        const matchedKeywords = keywords[domain.name].filter((keyword) =>
-          q.includes(keyword),
-        );
-
-        return {
-          ...domain,
-          matchedKeywords,
-          confidence: Math.min(matchedKeywords.length / 3, 1),
-        };
-      })
-      .sort((a, b) => b.confidence - a.confidence);
-
-    return (
-      ranked[0] || {
-        name: 'general legal inquiry',
-        confidence: 0,
-        sources: [],
-        matchedKeywords: [],
-      }
-    );
-  }
-
-  private mergeSearchResults(
-    semanticResults: LawArticle[],
-    keywordResults: LawArticle[],
-    limit: number,
-  ): LawArticle[] {
-    const merged = new Map<string, LawArticle>();
-
-    for (const result of [...keywordResults, ...semanticResults]) {
-      if (!merged.has(result.id)) {
-        merged.set(result.id, result);
-      }
-    }
-
-    return Array.from(merged.values()).slice(0, limit);
   }
 
   /**
@@ -697,7 +421,6 @@ export class LegalAgentService {
     query: string,
     toolResults: ToolExecutionResult,
     detectedLanguage?: string,
-    memoryContext?: ConversationMemoryContext | null,
   ): Promise<{
     answer: string;
     citations: any[];
@@ -706,17 +429,15 @@ export class LegalAgentService {
     relatedArticles: any[];
   }> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
-      const unique = toolResults.mergedResults;
+      const unique = toolResults.semanticResults;
 
       const citations = unique.map((a) =>
         this.citationTool.generateInlineCitation(a),
       );
 
       // Check LLM response cache
-      const memoryPrompt = this.buildConversationMemoryPrompt(memoryContext);
       const cacheKey = this.llmCacheService.generateKey(query, [
         'semantic_search',
-        this.buildMemoryFingerprint(memoryContext),
       ]);
       const cachedResponse = this.llmCacheService.get(cacheKey);
 
@@ -817,9 +538,6 @@ This response is for informational purposes only and does not constitute legal a
 Context (verified legal sources only):
 ${context}
 
-Conversation Memory (for continuity only; do not cite this as law):
-${memoryPrompt}
-
 User Question:
 ${query}
 
@@ -862,89 +580,6 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
         relatedArticles: [],
       };
     });
-  }
-
-  private async storeAgentTurn(params: {
-    userId: string;
-    sessionId: string;
-    userQuery: string;
-    response: string;
-    toolsUsed?: string[];
-    lawSectionsRef?: string[];
-    agentThought?: Record<string, any>;
-  }): Promise<void> {
-    try {
-      const turnNumber = await this.performanceTracker.track(
-        'getNextTurnNumber',
-        () => this.conversationService.getNextTurnNumber(params.sessionId),
-      );
-
-      await this.memoryService.storeConversation({
-        ...params,
-        turnNumber,
-      });
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to store agent turn: ${error.message}`,
-        error.stack,
-      );
-    }
-  }
-
-  private buildConversationMemoryPrompt(
-    memoryContext?: ConversationMemoryContext | null,
-  ): string {
-    if (!memoryContext) {
-      return 'No prior conversation memory is available.';
-    }
-
-    const recentTurns = memoryContext.recentTurns || [];
-    const topics = memoryContext.topicsOfInterest || [];
-
-    if (recentTurns.length === 0 && topics.length === 0) {
-      return 'No prior conversation memory is available.';
-    }
-
-    const recentTurnLines = recentTurns
-      .map((turn, index) => {
-        const topic = turn.topic ? ` Topic: ${turn.topic}.` : '';
-        return `${index + 1}. User asked: "${turn.query}"${topic} Assistant answered: "${turn.response}"`;
-      })
-      .join('\n');
-
-    const topicLines = topics
-      .map((topic) => {
-        const lastQuery =
-          typeof topic.content?.query === 'string'
-            ? ` Last related query: "${topic.content.query}"`
-            : '';
-        return `- ${topic.key} (importance ${topic.importance || 1}).${lastQuery}`;
-      })
-      .join('\n');
-
-    return [
-      recentTurnLines ? `Recent turns:\n${recentTurnLines}` : '',
-      topicLines ? `Known user topics:\n${topicLines}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-  }
-
-  private buildMemoryFingerprint(
-    memoryContext?: ConversationMemoryContext | null,
-  ): string {
-    if (!memoryContext) {
-      return 'memory:none';
-    }
-
-    const recentQueries = (memoryContext.recentTurns || [])
-      .map((turn) => turn.query)
-      .join('|');
-    const topics = (memoryContext.topicsOfInterest || [])
-      .map((topic) => topic.key)
-      .join('|');
-
-    return `memory:${memoryContext.conversationLength || 0}:${recentQueries}:${topics}`;
   }
 
   /**
