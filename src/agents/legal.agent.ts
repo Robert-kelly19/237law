@@ -5,8 +5,10 @@ import { ContextTool } from './tools/context.tool';
 import { MemoryService } from '../memory/memory.service';
 import { ConversationService } from '../memory/conversation.service';
 import { PerformanceTrackerService } from '../performance/performance-tracker.service';
-import { LLMResponseCacheService } from '../cache/llm-response-cache.service';
-import { EmbeddingService } from '../embedding.service';
+import {
+  LLMResponseCacheService,
+  LLMSynthesisCacheValue,
+} from '../cache/llm-response-cache.service';
 import { LanguageDetectionService } from '../common/language-detection.service';
 import { GreetingsService } from '../common/greetings.service';
 import OpenAI from 'openai';
@@ -55,6 +57,8 @@ type ToolExecutionResult = {
   overallConfidence: number;
 };
 
+type SynthesisResult = LLMSynthesisCacheValue;
+
 @Injectable()
 export class LegalAgentService {
   private readonly logger = new Logger(LegalAgentService.name);
@@ -68,7 +72,6 @@ export class LegalAgentService {
     private conversationService: ConversationService,
     private performanceTracker: PerformanceTrackerService,
     private llmCacheService: LLMResponseCacheService,
-    private embeddingService: EmbeddingService,
     private languageDetection: LanguageDetectionService,
     private greetingsService: GreetingsService,
   ) {
@@ -128,9 +131,8 @@ export class LegalAgentService {
               `User already greeted recently, skipping greeting response`,
             );
 
-            const followUpGreeting = this.greetingsService.getFollowUpGreeting(
-              detectedLanguage,
-            );
+            const followUpGreeting =
+              this.greetingsService.getFollowUpGreeting(detectedLanguage);
 
             // Use follow-up greeting instead of formal greeting
             return {
@@ -163,7 +165,9 @@ export class LegalAgentService {
               detectedGreetingLanguage,
               query.userId,
             );
-            this.logger.debug(`First greeting detected, returning: ${greeting}`);
+            this.logger.debug(
+              `First greeting detected, returning: ${greeting}`,
+            );
 
             return {
               answer: greeting,
@@ -190,14 +194,62 @@ export class LegalAgentService {
         }
 
         // If text has greeting + legal intent, skip greeting response
-        if (
-          this.languageDetection.isGreeting(query.query) &&
-          hasLegalIntent
-        ) {
+        if (this.languageDetection.isGreeting(query.query) && hasLegalIntent) {
           this.logger.debug(
             `Greeting with legal intent detected, proceeding to legal processing`,
           );
           // Continue to legal processing below
+        }
+
+        const earlyCachedResult = this.getCachedAnswer(query.query);
+        if (earlyCachedResult) {
+          this.logger.debug(
+            `LLM response cache hit before retrieval for query: ${query.query.substring(0, 50)}...`,
+          );
+
+          return {
+            answer: earlyCachedResult.answer,
+            citations: earlyCachedResult.citations,
+            reasoning: {
+              confidence: 1.0,
+              toolsUsed: ['answer_cache'],
+              steps: [
+                {
+                  step: 2,
+                  action: 'answer_cache_hit',
+                  input: query.query,
+                  output: 'cached_answer',
+                  confidence: 1.0,
+                },
+              ],
+            },
+            relatedArticles: earlyCachedResult.relatedArticles,
+          };
+        }
+
+        const lowValueResponse = this.getLowValueQueryResponse(
+          query.query,
+          detectedLanguage,
+        );
+        if (lowValueResponse) {
+          return {
+            answer: lowValueResponse,
+            citations: [],
+            reasoning: {
+              confidence: 1.0,
+              toolsUsed: ['low_value_query_guard'],
+              steps: [
+                {
+                  step: 2,
+                  action: 'skip_openai_for_low_value_query',
+                  input: query.query,
+                  output: lowValueResponse,
+                  confidence: 1.0,
+                },
+              ],
+            },
+            relatedArticles: [],
+          };
         }
 
         // STEP 2: Lightweight intent analysis (NO taxonomy)
@@ -215,14 +267,11 @@ export class LegalAgentService {
         });
 
         // STEP 3: Build context with already-fetched sessionId
-        const [context] = await Promise.all([
-          this.performanceTracker.track('buildContextSummary', async () =>
+        const context = await this.performanceTracker.track(
+          'buildContextSummary',
+          async () =>
             this.contextTool.buildContextSummary(query.userId, sessionId),
-          ),
-          this.performanceTracker.track('generateQueryEmbedding', () =>
-            this.embeddingService.generateQueryEmbedding(query.query),
-          ),
-        ]);
+        );
 
         addReasoningStep({
           step: 3,
@@ -366,13 +415,13 @@ export class LegalAgentService {
   }
 
   /**
-   * Always semantic-first tool planning
+   * Keyword-first tool planning to avoid unnecessary OpenAI embedding calls.
    */
   private planToolUsage(): {
     tools: string[];
     sequence: string;
   } {
-    const tools = ['search_semantic'];
+    const tools = ['search_keyword', 'search_semantic_fallback'];
 
     return {
       tools,
@@ -395,9 +444,21 @@ export class LegalAgentService {
     };
 
     try {
-      // Semantic search only
-      if (toolPlan.tools.includes('search_semantic')) {
-        const res = await this.lawSearchTool.searchByTopic(query, 5);
+      if (toolPlan.tools.includes('search_keyword')) {
+        const keywordRes = await this.lawSearchTool.searchByKeyword(query, 3);
+
+        if (keywordRes.success) {
+          results.searchResults = keywordRes.data;
+        }
+      }
+
+      // Semantic search uses OpenAI embeddings, so only use it when keyword
+      // search found nothing useful.
+      if (
+        results.searchResults.length === 0 &&
+        toolPlan.tools.includes('search_semantic_fallback')
+      ) {
+        const res = await this.lawSearchTool.searchByTopic(query, 3);
 
         if (res.success) {
           results.semanticResults = res.data;
@@ -405,7 +466,11 @@ export class LegalAgentService {
       }
 
       results.overallConfidence =
-        results.semanticResults.length > 0 ? 0.9 : 0.3;
+        results.searchResults.length > 0
+          ? 0.75
+          : results.semanticResults.length > 0
+            ? 0.9
+            : 0.3;
     } catch (error: any) {
       this.logger.error(error.message);
       results.overallConfidence = 0.6;
@@ -421,24 +486,19 @@ export class LegalAgentService {
     query: string,
     toolResults: ToolExecutionResult,
     detectedLanguage?: string,
-  ): Promise<{
-    answer: string;
-    citations: any[];
-    citedArticles: any[];
-    toolsUsed: string[];
-    relatedArticles: any[];
-  }> {
+  ): Promise<SynthesisResult> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
-      const unique = toolResults.semanticResults;
+      const unique = this.dedupeArticles([
+        ...toolResults.searchResults,
+        ...toolResults.semanticResults,
+      ]).slice(0, 3);
 
       const citations = unique.map((a) =>
         this.citationTool.generateInlineCitation(a),
       );
 
       // Check LLM response cache
-      const cacheKey = this.llmCacheService.generateKey(query, [
-        'semantic_search',
-      ]);
+      const cacheKey = this.getAnswerCacheKey(query);
       const cachedResponse = this.llmCacheService.get(cacheKey);
 
       let answer: string;
@@ -452,11 +512,12 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
         this.logger.debug(
           `LLM response cache hit for query: ${query.substring(0, 50)}...`,
         );
-        answer = cachedResponse;
+        return cachedResponse;
       } else {
         const context = unique
           .map(
-            (s) => `${s.lawName} - Article ${s.articleNumber}:\n${s.content}`,
+            (s) =>
+              `${s.lawName} - Article ${s.articleNumber}:\n${this.truncateForPrompt(s.content, 1200)}`,
           )
           .join('\n\n');
 
@@ -544,31 +605,36 @@ ${query}
 Answer:
 `;
 
-        const response = await this.performanceTracker.track(
-          'openai_chat_completion',
-          async () =>
-            this.openai.chat.completions.create({
-              model: 'gpt-4.1-mini',
-              messages: [{ role: 'user', content: prompt }],
-              temperature: 0.3,
-              max_tokens: 500,
-            }),
-        );
+        try {
+          const response = await this.performanceTracker.track(
+            'openai_chat_completion',
+            async () =>
+              this.openai.chat.completions.create({
+                model: 'gpt-4.1-mini',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3,
+                max_tokens: 500,
+              }),
+          );
 
-        answer = response.choices?.[0]?.message?.content?.trim() || '';
+          answer = response.choices?.[0]?.message?.content?.trim() || '';
+        } catch (error: any) {
+          this.logger.error(
+            `OpenAI answer generation failed, using retrieved law fallback: ${error.message}`,
+            error.stack,
+          );
+          answer = this.buildRetrievedLawFallbackAnswer(unique);
+        }
 
         if (!answer) {
           answer = `Sorry, I couldn't find a clear legal answer for your question.
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-        } else {
-          // Cache the LLM response for future identical queries
-          this.llmCacheService.set(cacheKey, answer);
         }
       }
 
-      return {
+      const synthesis = {
         answer,
         citations,
         citedArticles: unique.map((a) => ({
@@ -576,10 +642,164 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
           lawName: a.lawName,
           articleNumber: a.articleNumber,
         })),
-        toolsUsed: ['semantic_search'],
+        toolsUsed:
+          toolResults.searchResults.length > 0
+            ? ['keyword_search']
+            : ['semantic_search'],
         relatedArticles: [],
       };
+
+      if (unique.length > 0) {
+        this.llmCacheService.set(cacheKey, synthesis);
+      }
+
+      return synthesis;
     });
+  }
+
+  private getAnswerCacheKey(query: string): string {
+    return this.llmCacheService.generateKey(this.normalizeQuery(query), [
+      'legal_answer_v2',
+    ]);
+  }
+
+  private getCachedAnswer(query: string): SynthesisResult | null {
+    return this.llmCacheService.get(this.getAnswerCacheKey(query));
+  }
+
+  private normalizeQuery(query: string): string {
+    return query.toLowerCase().trim().replace(/\s+/g, ' ');
+  }
+
+  private getLowValueQueryResponse(
+    query: string,
+    detectedLanguage?: string,
+  ): string | null {
+    const normalized = this.normalizeQuery(query).replace(/[?.!,]+$/g, '');
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const lowValueMessages = new Set([
+      'ok',
+      'okay',
+      'yes',
+      'no',
+      'thanks',
+      'thank you',
+      'cool',
+      'fine',
+      'alright',
+      'good',
+      'hmm',
+      'lol',
+    ]);
+
+    if (lowValueMessages.has(normalized)) {
+      return this.getClarifyingLegalQuestionPrompt(detectedLanguage);
+    }
+
+    if (
+      words.length <= 2 &&
+      !this.hasLegalKeyword(normalized) &&
+      !this.languageDetection.hasLegalIntent(query)
+    ) {
+      return this.getClarifyingLegalQuestionPrompt(detectedLanguage);
+    }
+
+    return null;
+  }
+
+  private getClarifyingLegalQuestionPrompt(language?: string): string {
+    switch (language) {
+      case 'french':
+        return 'Veuillez poser une question juridique précise sur le droit camerounais afin que je puisse vous aider.';
+      case 'pidgin':
+        return 'Abeg ask one clear legal question about Cameroon law so I fit help you well.';
+      default:
+        return 'Please ask a clear legal question about Cameroonian law so I can help you.';
+    }
+  }
+
+  private hasLegalKeyword(query: string): boolean {
+    const legalKeywords = [
+      'law',
+      'legal',
+      'court',
+      'judge',
+      'arrest',
+      'lawsuit',
+      'sue',
+      'contract',
+      'rights',
+      'police',
+      'warrant',
+      'bail',
+      'charge',
+      'guilty',
+      'innocent',
+      'attorney',
+      'lawyer',
+      'case',
+      'trial',
+      'verdict',
+      'sentence',
+      'crime',
+      'criminal',
+      'civil',
+      'property',
+      'inheritance',
+      'divorce',
+      'custody',
+      'harassment',
+      'assault',
+      'theft',
+      'fraud',
+      'liability',
+      'rent',
+      'tenant',
+      'landlord',
+      'marriage',
+      'employment',
+      'salary',
+    ];
+
+    return legalKeywords.some((keyword) => query.includes(keyword));
+  }
+
+  private dedupeArticles(articles: LawArticle[]): LawArticle[] {
+    const seen = new Set<string>();
+    return articles.filter((article) => {
+      const key = article.id || `${article.lawName}:${article.articleNumber}`;
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private truncateForPrompt(content: string, maxLength: number): string {
+    if (content.length <= maxLength) {
+      return content;
+    }
+
+    return `${content.slice(0, maxLength).trim()}...`;
+  }
+
+  private buildRetrievedLawFallbackAnswer(articles: LawArticle[]): string {
+    const legalBasis = articles
+      .map(
+        (article) =>
+          `- Article ${article.articleNumber} of ${article.lawName}: ${this.truncateForPrompt(article.content, 500)}`,
+      )
+      .join('\n');
+
+    return `I found relevant Cameroonian legal provisions, but I could not generate a full AI explanation right now.
+
+**Legal Basis**
+${legalBasis}
+
+**Important Notice**
+This response is for informational purposes only and does not constitute legal advice. For proper legal assistance tailored to your situation, please consult a qualified Cameroonian lawyer.`;
   }
 
   /**
