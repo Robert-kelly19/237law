@@ -4,8 +4,16 @@ import { Injectable, Logger } from '@nestjs/common';
  * In-memory cache for LLM responses with TTL
  * Useful for caching frequent responses (e.g., common legal questions)
  */
+export interface LLMSynthesisCacheValue {
+  answer: string;
+  citations: any[];
+  citedArticles: any[];
+  toolsUsed: string[];
+  relatedArticles: any[];
+}
+
 interface LLMCacheEntry {
-  response: string;
+  response: LLMSynthesisCacheValue;
   timestamp: number;
   hits: number;
 }
@@ -29,7 +37,7 @@ export class LLMResponseCacheService {
   /**
    * Get cached LLM response if exists and not expired
    */
-  get(key: string): string | null {
+  get(key: string): LLMSynthesisCacheValue | null {
     const entry = this.cache.get(key);
 
     if (!entry) {
@@ -51,7 +59,7 @@ export class LLMResponseCacheService {
   /**
    * Store LLM response in cache
    */
-  set(key: string, response: string): void {
+  set(key: string, response: LLMSynthesisCacheValue): void {
     // Evict LRU entry if cache is full
     if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
       const lruKey = Array.from(this.cache.entries()).reduce(

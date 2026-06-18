@@ -5,7 +5,10 @@ import { ContextTool } from './tools/context.tool';
 import { MemoryService } from '../memory/memory.service';
 import { ConversationService } from '../memory/conversation.service';
 import { PerformanceTrackerService } from '../performance/performance-tracker.service';
-import { LLMResponseCacheService } from '../cache/llm-response-cache.service';
+import {
+  LLMResponseCacheService,
+  LLMSynthesisCacheValue,
+} from '../cache/llm-response-cache.service';
 import { LanguageDetectionService } from '../common/language-detection.service';
 import { GreetingsService } from '../common/greetings.service';
 import OpenAI from 'openai';
@@ -53,6 +56,8 @@ type ToolExecutionResult = {
   crossReferences: LawArticle[];
   overallConfidence: number;
 };
+
+type SynthesisResult = LLMSynthesisCacheValue;
 
 @Injectable()
 export class LegalAgentService {
@@ -196,15 +201,15 @@ export class LegalAgentService {
           // Continue to legal processing below
         }
 
-        const earlyCachedAnswer = this.getCachedAnswer(query.query);
-        if (earlyCachedAnswer) {
+        const earlyCachedResult = this.getCachedAnswer(query.query);
+        if (earlyCachedResult) {
           this.logger.debug(
             `LLM response cache hit before retrieval for query: ${query.query.substring(0, 50)}...`,
           );
 
           return {
-            answer: earlyCachedAnswer,
-            citations: [],
+            answer: earlyCachedResult.answer,
+            citations: earlyCachedResult.citations,
             reasoning: {
               confidence: 1.0,
               toolsUsed: ['answer_cache'],
@@ -218,7 +223,7 @@ export class LegalAgentService {
                 },
               ],
             },
-            relatedArticles: [],
+            relatedArticles: earlyCachedResult.relatedArticles,
           };
         }
 
@@ -481,13 +486,7 @@ export class LegalAgentService {
     query: string,
     toolResults: ToolExecutionResult,
     detectedLanguage?: string,
-  ): Promise<{
-    answer: string;
-    citations: any[];
-    citedArticles: any[];
-    toolsUsed: string[];
-    relatedArticles: any[];
-  }> {
+  ): Promise<SynthesisResult> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
       const unique = this.dedupeArticles([
         ...toolResults.searchResults,
@@ -513,7 +512,7 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
         this.logger.debug(
           `LLM response cache hit for query: ${query.substring(0, 50)}...`,
         );
-        answer = cachedResponse;
+        return cachedResponse;
       } else {
         const context = unique
           .map(
@@ -632,13 +631,10 @@ Answer:
 
 NB: This response is provided for informational purposes only and does not constitute legal advice.
 For proper legal assistance, please consult a qualified lawyer via the contact details in our bio.`;
-        } else {
-          // Cache the LLM response for future identical queries
-          this.llmCacheService.set(cacheKey, answer);
         }
       }
 
-      return {
+      const synthesis = {
         answer,
         citations,
         citedArticles: unique.map((a) => ({
@@ -652,6 +648,12 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
             : ['semantic_search'],
         relatedArticles: [],
       };
+
+      if (unique.length > 0) {
+        this.llmCacheService.set(cacheKey, synthesis);
+      }
+
+      return synthesis;
     });
   }
 
@@ -661,7 +663,7 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
     ]);
   }
 
-  private getCachedAnswer(query: string): string | null {
+  private getCachedAnswer(query: string): SynthesisResult | null {
     return this.llmCacheService.get(this.getAnswerCacheKey(query));
   }
 
