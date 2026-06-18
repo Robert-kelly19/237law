@@ -162,9 +162,17 @@ export class WhatsappController implements OnModuleDestroy {
           // Mark message as processed before processing to prevent race conditions
           this.markMessageAsProcessed(messageId);
 
-          // NEW: Implement message buffering for greeting→question detection
           try {
             await this.whatsappService.sendTypingIndicator(from);
+          } catch (err: any) {
+            this.logger.error(
+              `Error sending typing indicator: ${err instanceof Error ? err.message : String(err)}`,
+              err instanceof Error ? err.stack : undefined,
+            );
+          }
+
+          // NEW: Implement message buffering for greeting→question detection
+          try {
             await this.processMessageWithBuffering(from, text, messageId);
           } catch (err: any) {
             this.logger.error(

@@ -99,10 +99,10 @@ export class WhatsappService {
           },
         };
 
-        try {
-          const abortController = new AbortController();
-          const timeoutId = setTimeout(() => abortController.abort(), 5000);
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 5000);
 
+        try {
           const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -112,8 +112,6 @@ export class WhatsappService {
             body: JSON.stringify(payload),
             signal: abortController.signal,
           });
-
-          clearTimeout(timeoutId);
 
           if (!response.ok) {
             const errorText = await response.text();
@@ -126,6 +124,8 @@ export class WhatsappService {
         } catch (error) {
           this.logger.error('Error sending WhatsApp typing indicator', error);
           throw error;
+        } finally {
+          clearTimeout(timeoutId);
         }
       },
     );

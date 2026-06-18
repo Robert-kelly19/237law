@@ -6,10 +6,16 @@ import { Injectable, Logger } from '@nestjs/common';
  */
 export interface LLMSynthesisCacheValue {
   answer: string;
-  citations: any[];
-  citedArticles: any[];
+  citations: string[];
+  citedArticles: LLMCitedArticle[];
   toolsUsed: string[];
-  relatedArticles: any[];
+  relatedArticles: unknown[];
+}
+
+export interface LLMCitedArticle {
+  id: string;
+  lawName: string;
+  articleNumber: string;
 }
 
 interface LLMCacheEntry {
@@ -53,7 +59,7 @@ export class LLMResponseCacheService {
     entry.hits++;
     entry.timestamp = Date.now();
 
-    return entry.response;
+    return this.cloneResponse(entry.response);
   }
 
   /**
@@ -69,7 +75,7 @@ export class LLMResponseCacheService {
     }
 
     this.cache.set(key, {
-      response,
+      response: this.cloneResponse(response),
       timestamp: Date.now(),
       hits: 0,
     });
@@ -137,5 +143,11 @@ export class LLMResponseCacheService {
       clearInterval(this.cleanupIntervalId);
       this.cleanupIntervalId = null;
     }
+  }
+
+  private cloneResponse(
+    response: LLMSynthesisCacheValue,
+  ): LLMSynthesisCacheValue {
+    return structuredClone(response);
   }
 }
