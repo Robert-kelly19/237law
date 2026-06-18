@@ -164,11 +164,8 @@ export class WhatsappController implements OnModuleDestroy {
 
           // NEW: Implement message buffering for greeting→question detection
           try {
-            await this.processMessageWithBuffering(
-              from,
-              text,
-              messageId,
-            );
+            await this.whatsappService.sendTypingIndicator(from);
+            await this.processMessageWithBuffering(from, text, messageId);
           } catch (err: any) {
             this.logger.error(
               `Error processing message: ${err instanceof Error ? err.message : String(err)}`,
@@ -233,9 +230,7 @@ export class WhatsappController implements OnModuleDestroy {
       // Clear previous pending greeting if exists
       if (existingPending) {
         clearTimeout(existingPending.timeoutId);
-        this.logger.debug(
-          `Cleared previous pending greeting for ${from}`,
-        );
+        this.logger.debug(`Cleared previous pending greeting for ${from}`);
       }
 
       // Buffer this greeting with a timeout
@@ -247,7 +242,8 @@ export class WhatsappController implements OnModuleDestroy {
 
         // Send the greeting response after waiting for follow-up
         try {
-          const sessionId = await this.conversationService.getOrCreateSession(from);
+          const sessionId =
+            await this.conversationService.getOrCreateSession(from);
           const response = await this.legalAgent.processQuery({
             userId: from,
             sessionId,
@@ -344,9 +340,7 @@ export class WhatsappController implements OnModuleDestroy {
       if (now - pending.timestamp > 5000) {
         clearTimeout(pending.timeoutId);
         this.pendingGreetings.delete(userId);
-        this.logger.debug(
-          `Cleaned up stale pending greeting for ${userId}`,
-        );
+        this.logger.debug(`Cleaned up stale pending greeting for ${userId}`);
       }
     }
 
