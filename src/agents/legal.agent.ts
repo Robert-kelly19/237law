@@ -312,7 +312,7 @@ export class LegalAgentService {
         const synthesis = await this.performanceTracker.track(
           'synthesizeResults',
           () =>
-            this.synthesizeResults(query.query, toolResults, detectedLanguage),
+            this.synthesizeResults(query.query, toolResults, detectedLanguage, context),
         );
 
         addReasoningStep({
@@ -486,6 +486,7 @@ export class LegalAgentService {
     query: string,
     toolResults: ToolExecutionResult,
     detectedLanguage?: string,
+    conversationContext?: ToolResult,
   ): Promise<SynthesisResult> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
       const unique = this.dedupeArticles([
@@ -596,6 +597,12 @@ This response is for informational purposes only and does not constitute legal a
 
 ---
 
+${conversationContext?.data?.history && conversationContext.data.history.length > 0 ? `**Previous Conversation Context**
+${conversationContext.data.history.map((turn: any) => `User: ${turn.userQuery}\nAgent: ${turn.response}`).join('\n\n')}
+
+---
+
+` : ''}
 Context (verified legal sources only):
 ${context}
 
