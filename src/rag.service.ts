@@ -125,7 +125,10 @@ export class RagService implements OnModuleInit {
             `;
             insertCount++;
           }
-        });
+        },
+      {
+        timeout: 60000,
+      });
 
         this.logger.log(
           `[RagService] Successfully inserted ${insertCount} chunks from ${source}`,
