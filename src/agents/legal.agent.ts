@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LawSearchTool } from './tools/law-search.tool';
 import { CitationTool } from './tools/citation.tool';
-import { ContextTool } from './tools/context.tool';
+import { ContextTool, ToolResult } from './tools/context.tool';
 import { MemoryService } from '../memory/memory.service';
 import { ConversationService } from '../memory/conversation.service';
 import { PerformanceTrackerService } from '../performance/performance-tracker.service';
@@ -201,7 +201,7 @@ export class LegalAgentService {
           // Continue to legal processing below
         }
 
-        const earlyCachedResult = this.getCachedAnswer(query.query);
+        const earlyCachedResult = this.getCachedAnswer(query.query, sessionId);
         if (earlyCachedResult) {
           this.logger.debug(
             `LLM response cache hit before retrieval for query: ${query.query.substring(0, 50)}...`,
@@ -312,7 +312,7 @@ export class LegalAgentService {
         const synthesis = await this.performanceTracker.track(
           'synthesizeResults',
           () =>
-            this.synthesizeResults(query.query, toolResults, detectedLanguage),
+            this.synthesizeResults(query.query, toolResults, detectedLanguage, context),
         );
 
         addReasoningStep({
@@ -486,6 +486,7 @@ export class LegalAgentService {
     query: string,
     toolResults: ToolExecutionResult,
     detectedLanguage?: string,
+    conversationContext?: ToolResult,
   ): Promise<SynthesisResult> {
     return this.performanceTracker.track('rag_synthesis_with_llm', async () => {
       const unique = this.dedupeArticles([
@@ -497,8 +498,8 @@ export class LegalAgentService {
         this.citationTool.generateInlineCitation(a),
       );
 
-      // Check LLM response cache
-      const cacheKey = this.getAnswerCacheKey(query);
+      // Check LLM response cache (include sessionId to differentiate conversation contexts)
+      const cacheKey = this.getAnswerCacheKey(query, conversationContext?.data?.sessionId);
       const cachedResponse = this.llmCacheService.get(cacheKey);
 
       let answer: string;
@@ -596,6 +597,12 @@ This response is for informational purposes only and does not constitute legal a
 
 ---
 
+${conversationContext?.data?.history && conversationContext.data.history.length > 0 ? `**Previous Conversation Context**
+${conversationContext.data.history.map((turn: any) => `User: ${turn.userQuery}\nAgent: ${turn.response}`).join('\n\n')}
+
+---
+
+` : ''}
 Context (verified legal sources only):
 ${context}
 
@@ -657,14 +664,18 @@ For proper legal assistance, please consult a qualified lawyer via the contact d
     });
   }
 
-  private getAnswerCacheKey(query: string): string {
-    return this.llmCacheService.generateKey(this.normalizeQuery(query), [
-      'legal_answer_v2',
-    ]);
+  private getAnswerCacheKey(query: string, sessionId?: string): string {
+    // Include sessionId in cache key to avoid sharing responses across different sessions
+    // with different conversation histories
+    const scope = sessionId ? `session_${sessionId}` : 'session_anon';
+    return this.llmCacheService.generateKey(
+      `${this.normalizeQuery(query)}#${scope}`,
+      ['legal_answer_v2'],
+    );
   }
 
-  private getCachedAnswer(query: string): SynthesisResult | null {
-    return this.llmCacheService.get(this.getAnswerCacheKey(query));
+  private getCachedAnswer(query: string, sessionId?: string): SynthesisResult | null {
+    return this.llmCacheService.get(this.getAnswerCacheKey(query, sessionId));
   }
 
   private normalizeQuery(query: string): string {
