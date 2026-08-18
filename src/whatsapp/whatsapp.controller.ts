@@ -48,7 +48,7 @@ interface WebhookMessage {
   timestamp?: string;
   text?: WebhookText;
   type?: string;
-  [key: string]: any; // For other message types like images, videos, etc.
+  [key: string]: any;
 }
 
 interface WebhookText {

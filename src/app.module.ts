@@ -19,6 +19,7 @@ import { EmbeddingCacheService } from './cache/embedding-cache.service';
 import { LLMResponseCacheService } from './cache/llm-response-cache.service';
 import { PerformanceTrackerService } from './performance/performance-tracker.service';
 import { CommonModule } from './common/common.module';
+import { SmsModule } from './sms/sms.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CommonModule } from './common/common.module';
       isGlobal: true,
     }),
     CommonModule,
+    SmsModule,
   ],
   controllers: [AppController, RagController, WhatsappController],
   providers: [
