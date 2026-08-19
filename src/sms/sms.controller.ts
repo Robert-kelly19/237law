@@ -1,57 +1,57 @@
 import {
   Body,
   Controller,
+  Headers,
   HttpCode,
   HttpStatus,
   Logger,
   Post,
+  UnauthorizedException,
+  ValidationPipe,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
+import { maskMsisdn } from '../common/mask-msisdn';
+import { CreateSmDto } from './dto/create-sm.dto';
 import { SmsService } from './sms.service';
 
 @Controller('sms')
 export class SmsController {
-  private readonly logger =
-    new Logger(SmsController.name);
+  private readonly logger = new Logger(SmsController.name);
 
   constructor(
     private readonly smsService: SmsService,
+    private readonly configService: ConfigService,
   ) {}
 
-  
   @Post('callback')
   @HttpCode(HttpStatus.OK)
   async handleIncomingSms(
-    @Body() body: any,
+    @Headers('x-mtn-webhook-secret') webhookSecret: string | undefined,
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    body: CreateSmDto,
   ) {
-    this.logger.log(
-      `Received MTN SMS callback: ${JSON.stringify(body)}`,
-    );
+    const expectedSecret = this.configService.get<string>('MTN_WEBHOOK_SECRET');
 
-    
-    const phoneNumber =
-      body.senderAddress;
-
-    const messageText =
-      body.message;
-
-    if (!phoneNumber || !messageText) {
-      this.logger.warn(
-        'Invalid MTN SMS callback payload',
-      );
-
-      return {
-        status: 'ignored',
-        message:
-          'Missing senderAddress or message',
-      };
+    if (!expectedSecret || webhookSecret !== expectedSecret) {
+      this.logger.warn('Rejected unauthorized MTN SMS callback');
+      throw new UnauthorizedException('Unauthorized SMS callback');
     }
 
-    
-    await this.smsService.processIncomingSms(
-      phoneNumber,
-      messageText,
+    const phoneNumber = body.senderAddress;
+    const messageText = body.message;
+
+    this.logger.debug(
+      `Received MTN SMS callback from ${maskMsisdn(phoneNumber)} (messageLength=${messageText.length})`,
     );
+
+    void this.smsService.processIncomingSms(phoneNumber, messageText);
 
     return {
       status: 'received',

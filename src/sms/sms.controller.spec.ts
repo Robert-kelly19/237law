@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { SmsController } from './sms.controller';
 import { SmsService } from './sms.service';
 
@@ -8,7 +9,10 @@ describe('SmsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SmsController],
-      providers: [SmsService],
+      providers: [
+        { provide: SmsService, useValue: { processIncomingSms: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
+      ],
     }).compile();
 
     controller = module.get<SmsController>(SmsController);
