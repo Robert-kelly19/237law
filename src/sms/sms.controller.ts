@@ -1,34 +1,60 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Logger,
+  Post,
+} from '@nestjs/common';
+
 import { SmsService } from './sms.service';
-import { CreateSmDto } from './dto/create-sm.dto';
-import { UpdateSmDto } from './dto/update-sm.dto';
 
 @Controller('sms')
 export class SmsController {
-  constructor(private readonly smsService: SmsService) {}
+  private readonly logger =
+    new Logger(SmsController.name);
 
-  @Post()
-  create(@Body() createSmDto: CreateSmDto) {
-    return this.smsService.create(createSmDto);
-  }
+  constructor(
+    private readonly smsService: SmsService,
+  ) {}
 
-  @Get()
-  findAll() {
-    return this.smsService.findAll();
-  }
+  
+  @Post('callback')
+  @HttpCode(HttpStatus.OK)
+  async handleIncomingSms(
+    @Body() body: any,
+  ) {
+    this.logger.log(
+      `Received MTN SMS callback: ${JSON.stringify(body)}`,
+    );
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.smsService.findOne(+id);
-  }
+    
+    const phoneNumber =
+      body.senderAddress;
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSmDto: UpdateSmDto) {
-    return this.smsService.update(+id, updateSmDto);
-  }
+    const messageText =
+      body.message;
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.smsService.remove(+id);
+    if (!phoneNumber || !messageText) {
+      this.logger.warn(
+        'Invalid MTN SMS callback payload',
+      );
+
+      return {
+        status: 'ignored',
+        message:
+          'Missing senderAddress or message',
+      };
+    }
+
+    
+    await this.smsService.processIncomingSms(
+      phoneNumber,
+      messageText,
+    );
+
+    return {
+      status: 'received',
+    };
   }
 }
