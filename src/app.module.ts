@@ -13,12 +13,14 @@ import { AgentsModule } from './agents/agents.module';
 import { MemoryModule } from './memory/memory.module';
 import { UsersModule } from './users/users.module';
 import { AdminModule } from './admin/admin.module';
+import { PrismaModule } from './prisma.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    PrismaModule,
     CommonModule,
     AgentsModule,
     MemoryModule,

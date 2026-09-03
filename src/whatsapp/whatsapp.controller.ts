@@ -15,6 +15,7 @@ import { WhatsappService } from './whatsapp.service';
 import { LegalAgentService } from '../agents/legal.agent';
 import { ConversationService } from '../memory/conversation.service';
 import { PlatformUserService } from '../users/platform-user.service';
+import { maskMsisdn } from '../common/mask-msisdn';
 
 interface WhatsappWebhookBody {
   object?: string;
@@ -148,7 +149,7 @@ export class WhatsappController implements OnModuleDestroy {
             await this.platformUserService.upsertWhatsAppUser(from);
           } catch (err: any) {
             this.logger.error(
-              `Error tracking user ${from}: ${err instanceof Error ? err.message : String(err)}`,
+              `Error tracking user ${maskMsisdn(from)}: ${err instanceof Error ? err.message : String(err)}`,
               err instanceof Error ? err.stack : undefined,
             );
           }
