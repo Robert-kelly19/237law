@@ -22,6 +22,6 @@ import { LawSearchTool } from './tools/law-search.tool';
     LLMResponseCacheService,
     PerformanceTrackerService,
   ],
-  exports: [LegalAgentService],
+  exports: [LegalAgentService, EmbeddingService, PerformanceTrackerService],
 })
 export class AgentsModule {}

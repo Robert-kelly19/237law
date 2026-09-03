@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import type { AxiosError } from 'axios';
 import { randomUUID } from 'node:crypto';
+import { maskMsisdn } from '../common/mask-msisdn';
 
 import {
   LegalAgentService,
@@ -57,10 +58,7 @@ export class SmsService {
 
     try {
       this.logger.log(
-        `Processing SMS from ${phoneNumber}: "${messageText.substring(
-          0,
-          50,
-        )}${messageText.length > 50 ? '...' : ''}"`,
+        `Processing SMS from ${maskMsisdn(phoneNumber)} (messageLength=${messageText.length})`,
       );
 
       const sessionId =
@@ -77,13 +75,13 @@ export class SmsService {
       agentResponse = await this.legalAgent.processQuery(agentQuery);
 
       this.logger.log(
-        `Generated response for ${phoneNumber}: "${agentResponse.answer.substring(
-          0,
-          100,
-        )}${agentResponse.answer.length > 100 ? '...' : ''}"`,
+        `Generated response for ${maskMsisdn(phoneNumber)} (answerLength=${agentResponse.answer.length})`,
       );
     } catch (error) {
-      this.logger.error(`Failed to process SMS from ${phoneNumber}`, error);
+      this.logger.error(
+        `Failed to process SMS from ${maskMsisdn(phoneNumber)}`,
+        error,
+      );
 
       // Try to notify the user if something goes wrong
       try {
@@ -93,7 +91,7 @@ export class SmsService {
         );
       } catch (sendError) {
         this.logger.error(
-          `Failed to send error SMS to ${phoneNumber}`,
+          `Failed to send error SMS to ${maskMsisdn(phoneNumber)}`,
           sendError,
         );
       }
@@ -105,7 +103,7 @@ export class SmsService {
       await this.sendMtnSms(phoneNumber, agentResponse.answer);
     } catch (error) {
       this.logger.error(
-        `Failed to send AI SMS response to ${phoneNumber}`,
+        `Failed to send AI SMS response to ${maskMsisdn(phoneNumber)}`,
         error,
       );
     }
@@ -152,7 +150,7 @@ export class SmsService {
 
       const { data } =
         await this.httpService.axiosRef.post<MtnOutboundSmsResponse>(
-          '/messages/sms/outbound',
+          this.getMtnApiUrl('/v3/sms/messages/sms/outbound'),
           smsPayload,
           {
             headers: {
@@ -168,7 +166,10 @@ export class SmsService {
         `MTN SMS accepted. Transaction ID: ${data.transactionId}, Status: ${data.data?.status}`,
       );
     } catch (error) {
-      this.logger.error(`Failed to send MTN SMS to ${phoneNumber}`, error);
+      this.logger.error(
+        `Failed to send MTN SMS to ${maskMsisdn(phoneNumber)}`,
+        error,
+      );
 
       throw new BadGatewayException('MTN SMS service unavailable');
     }
@@ -225,7 +226,9 @@ export class SmsService {
       tokenPayload.append('client_secret', clientSecret);
 
       const { data } = await this.httpService.axiosRef.post<MtnTokenResponse>(
-        '/oauth/access_token/accesstoken?grant_type=client_credentials',
+        this.getMtnApiUrl(
+          '/v1/oauth/access_token/accesstoken?grant_type=client_credentials',
+        ),
         tokenPayload.toString(),
         {
           headers: {
@@ -272,5 +275,10 @@ export class SmsService {
 
   private formatPhoneNumber(phoneNumber: string): string {
     return phoneNumber.trim();
+  }
+
+  private getMtnApiUrl(path: string): string {
+    const baseURL = this.configService.getOrThrow<string>('MTN_API_BASE_URL');
+    return new URL(path, baseURL).toString();
   }
 }
