@@ -68,3 +68,18 @@ model AgentReasoning {
   @@index([conversationId])
   @@map("agent_reasoning")
 }
+
+model PlatformUser {
+  id          String   @id @default(cuid())
+  externalId  String   // WhatsApp phone number from webhook "from" field
+  phoneNumber String   // Sanitized phone number
+  channel     String   @default("whatsapp")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([externalId, channel])
+  @@index([externalId])
+  @@index([channel])
+  @@map("platform_users")
+}

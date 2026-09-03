@@ -1,49 +1,34 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { PrismaService } from './prisma.service';
 import { PdfService } from './pdf.service';
-import { EmbeddingService } from './embedding.service';
 import { RagService } from './rag.service';
 import { RagController } from './rag.controller';
 import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
-import { LawSearchTool } from './agents/tools/law-search.tool';
-import { CitationTool } from './agents/tools/citation.tool';
-import { MemoryService } from './memory/memory.service';
-import { ConversationService } from './memory/conversation.service';
 import { ConfigModule } from '@nestjs/config';
-import { LegalAgentService } from './agents/legal.agent';
-import { ContextTool } from './agents/tools/context.tool';
-import { EmbeddingCacheService } from './cache/embedding-cache.service';
-import { LLMResponseCacheService } from './cache/llm-response-cache.service';
-import { PerformanceTrackerService } from './performance/performance-tracker.service';
 import { CommonModule } from './common/common.module';
+import { SmsModule } from './sms/sms.module';
+import { AgentsModule } from './agents/agents.module';
+import { MemoryModule } from './memory/memory.module';
+import { UsersModule } from './users/users.module';
+import { AdminModule } from './admin/admin.module';
+import { PrismaModule } from './prisma.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    PrismaModule,
     CommonModule,
+    AgentsModule,
+    MemoryModule,
+    SmsModule,
+    UsersModule,
+    AdminModule,
   ],
   controllers: [AppController, RagController, WhatsappController],
-  providers: [
-    AppService,
-    PrismaService,
-    PdfService,
-    EmbeddingService,
-    RagService,
-    WhatsappService,
-    LegalAgentService,
-    LawSearchTool,
-    CitationTool,
-    ContextTool,
-    MemoryService,
-    ConversationService,
-    EmbeddingCacheService,
-    LLMResponseCacheService,
-    PerformanceTrackerService,
-  ],
+  providers: [AppService, PdfService, RagService, WhatsappService],
 })
 export class AppModule {}

@@ -11,10 +11,11 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { LanguageDetectionService } from '../common/language-detection.service';
 import { WhatsappService } from './whatsapp.service';
 import { LegalAgentService } from '../agents/legal.agent';
 import { ConversationService } from '../memory/conversation.service';
+import { PlatformUserService } from '../users/platform-user.service';
+import { maskMsisdn } from '../common/mask-msisdn';
 
 interface WhatsappWebhookBody {
   object?: string;
@@ -48,7 +49,7 @@ interface WebhookMessage {
   timestamp?: string;
   text?: WebhookText;
   type?: string;
-  [key: string]: any; // For other message types like images, videos, etc.
+  [key: string]: any;
 }
 
 interface WebhookText {
@@ -75,30 +76,11 @@ export class WhatsappController implements OnModuleDestroy {
    */
   private cleanupInterval: NodeJS.Timeout | null = null;
 
-  /**
-   * Buffer for pending greeting messages to detect greeting→question pattern
-   * Key: userId, Value: { text, messageId, timestamp, timeoutId }
-   */
-  private readonly pendingGreetings = new Map<
-    string,
-    {
-      text: string;
-      messageId: string;
-      timestamp: number;
-      timeoutId: NodeJS.Timeout;
-    }
-  >();
-
-  /**
-   * Delay to wait for follow-up after greeting (milliseconds)
-   */
-  private readonly GREETING_BUFFER_DELAY = 3000;
-
   constructor(
     private whatsappService: WhatsappService,
     private legalAgent: LegalAgentService,
-    private languageDetection: LanguageDetectionService,
     private conversationService: ConversationService,
+    private platformUserService: PlatformUserService,
   ) {
     // Start background cleanup task
     this.startCleanupTask();
@@ -162,6 +144,16 @@ export class WhatsappController implements OnModuleDestroy {
           // Mark message as processed before processing to prevent race conditions
           this.markMessageAsProcessed(messageId);
 
+          // Track the WhatsApp user (create or update lastSeenAt)
+          try {
+            await this.platformUserService.upsertWhatsAppUser(from);
+          } catch (err: any) {
+            this.logger.error(
+              `Error tracking user ${maskMsisdn(from)}: ${err instanceof Error ? err.message : String(err)}`,
+              err instanceof Error ? err.stack : undefined,
+            );
+          }
+
           try {
             await this.whatsappService.sendTypingIndicator(from);
           } catch (err: any) {
@@ -171,9 +163,9 @@ export class WhatsappController implements OnModuleDestroy {
             );
           }
 
-          // NEW: Implement message buffering for greeting→question detection
+          // Process the message through the legal agent and send the response
           try {
-            await this.processMessageWithBuffering(from, text, messageId);
+            await this.processMessage(from, text, messageId);
           } catch (err: any) {
             this.logger.error(
               `Error processing message: ${err instanceof Error ? err.message : String(err)}`,
@@ -216,85 +208,14 @@ export class WhatsappController implements OnModuleDestroy {
   }
 
   /**
-   * Process a message with greeting buffering to detect greeting→question pattern
-   * NEW: Implements message buffering and context-aware greeting detection
+   * Process an incoming message through the legal agent and send the response.
+   * Sent messages are always in direct response to a received webhook.
    */
-  private async processMessageWithBuffering(
+  private async processMessage(
     from: string,
     text: string,
     messageId: string,
   ): Promise<void> {
-    const isGreetingOnly = this.languageDetection.isGreetingOnly(text);
-    const hasLegalIntent = this.languageDetection.hasLegalIntent(text);
-
-    this.logger.debug(
-      `Message from ${from}: greeting=${isGreetingOnly}, hasLegalIntent=${hasLegalIntent}`,
-    );
-
-    if (isGreetingOnly && !hasLegalIntent) {
-      // This is a pure greeting - buffer it to wait for follow-up legal question
-      const existingPending = this.pendingGreetings.get(from);
-
-      // Clear previous pending greeting if exists
-      if (existingPending) {
-        clearTimeout(existingPending.timeoutId);
-        this.logger.debug(`Cleared previous pending greeting for ${from}`);
-      }
-
-      // Buffer this greeting with a timeout
-      const timeoutId = setTimeout(async () => {
-        this.pendingGreetings.delete(from);
-        this.logger.debug(
-          `Greeting buffer timeout for ${from}, sending greeting response`,
-        );
-
-        // Send the greeting response after waiting for follow-up
-        try {
-          const sessionId =
-            await this.conversationService.getOrCreateSession(from);
-          const response = await this.legalAgent.processQuery({
-            userId: from,
-            sessionId,
-            query: text,
-          });
-
-          this.logger.log(`Generated response: ${response.answer}`);
-          await this.whatsappService.send(from, response.answer);
-        } catch (err: any) {
-          this.logger.error(
-            `Error processing buffered greeting: ${err instanceof Error ? err.message : String(err)}`,
-            err instanceof Error ? err.stack : undefined,
-          );
-        }
-      }, this.GREETING_BUFFER_DELAY);
-
-      // Store pending greeting
-      this.pendingGreetings.set(from, {
-        text,
-        messageId,
-        timestamp: Date.now(),
-        timeoutId,
-      });
-
-      this.logger.debug(
-        `Buffered greeting from ${from}, waiting for follow-up...`,
-      );
-      return;
-    }
-
-    // Check if there's a pending greeting for this user
-    const pendingGreeting = this.pendingGreetings.get(from);
-    if (pendingGreeting) {
-      // Clear the pending greeting buffer
-      clearTimeout(pendingGreeting.timeoutId);
-      this.pendingGreetings.delete(from);
-
-      this.logger.debug(
-        `Greeting→Question pattern detected for ${from}, skipping greeting and responding to legal query`,
-      );
-    }
-
-    // Process the message normally through the agent
     try {
       const sessionId = await this.conversationService.getOrCreateSession(from);
       const response = await this.legalAgent.processQuery({
@@ -343,15 +264,6 @@ export class WhatsappController implements OnModuleDestroy {
       }
     }
 
-    // Also cleanup old pending greetings (older than 5 seconds)
-    for (const [userId, pending] of this.pendingGreetings.entries()) {
-      if (now - pending.timestamp > 5000) {
-        clearTimeout(pending.timeoutId);
-        this.pendingGreetings.delete(userId);
-        this.logger.debug(`Cleaned up stale pending greeting for ${userId}`);
-      }
-    }
-
     if (removedCount > 0) {
       this.logger.debug(
         `Cleaned up ${removedCount} old messages. Map size: ${this.processedMessages.size}`,
@@ -366,11 +278,5 @@ export class WhatsappController implements OnModuleDestroy {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
     }
-
-    // Clear all pending greetings
-    for (const pending of this.pendingGreetings.values()) {
-      clearTimeout(pending.timeoutId);
-    }
-    this.pendingGreetings.clear();
   }
 }
