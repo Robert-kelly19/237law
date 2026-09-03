@@ -12,6 +12,7 @@ import { SmsModule } from './sms/sms.module';
 import { AgentsModule } from './agents/agents.module';
 import { MemoryModule } from './memory/memory.module';
 import { UsersModule } from './users/users.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { UsersModule } from './users/users.module';
     MemoryModule,
     SmsModule,
     UsersModule,
+    AdminModule,
   ],
   controllers: [AppController, RagController, WhatsappController],
   providers: [AppService, PdfService, RagService, WhatsappService],
