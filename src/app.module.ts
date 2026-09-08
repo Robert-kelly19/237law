@@ -8,7 +8,6 @@ import { WhatsappController } from './whatsapp/whatsapp.controller';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { ConfigModule } from '@nestjs/config';
 import { CommonModule } from './common/common.module';
-import { SmsModule } from './sms/sms.module';
 import { AgentsModule } from './agents/agents.module';
 import { MemoryModule } from './memory/memory.module';
 import { UsersModule } from './users/users.module';
@@ -24,7 +23,6 @@ import { PrismaModule } from './prisma.module';
     CommonModule,
     AgentsModule,
     MemoryModule,
-    SmsModule,
     UsersModule,
     AdminModule,
   ],
