@@ -16,6 +16,6 @@ export class AdminBroadcastController {
 
   @Post('broadcast')
   async broadcast(@Body(new ValidationPipe({ transform: true })) dto: BroadcastDto) {
-    return this.broadcastService.sendBroadcast(dto.message.trim());
+    return this.broadcastService.sendBroadcast(dto.message);
   }
 }

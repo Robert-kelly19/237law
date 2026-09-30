@@ -134,7 +134,7 @@ export class AdminAnalyticsService {
       Array<{ week_start: string; count: bigint }>
     >(Prisma.sql`
       SELECT
-        date_trunc('week', ct."createdAt")::date AS "week_start",
+        TO_CHAR(date_trunc('week', ct."createdAt"), 'YYYY-MM-DD') AS "week_start",
         COUNT(DISTINCT ct."userId")::bigint AS "count"
       FROM "conversation_turns" AS ct
       INNER JOIN "platform_users" AS pu
@@ -142,12 +142,12 @@ export class AdminAnalyticsService {
        AND pu."channel" = 'whatsapp'
       WHERE ct."createdAt" >= ${startDate}
         AND ct."createdAt" < ${endExclusive}
-      GROUP BY date_trunc('week', ct."createdAt")::date
+      GROUP BY TO_CHAR(date_trunc('week', ct."createdAt"), 'YYYY-MM-DD')
       ORDER BY "week_start"
     `);
 
     const countMap = new Map(
-      results.map((r) => [String(r.week_start).slice(0, 10), Number(r.count)]),
+      results.map((r) => [r.week_start, Number(r.count)]),
     );
 
     return {
