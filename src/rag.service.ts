@@ -31,6 +31,11 @@ export class RagService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    if (process.env.NODE_ENV === 'test' || process.env.SKIP_PDF_INGESTION === 'true') {
+      this.logger.log('Skipping PDF ingestion during test/bootstrap mode');
+      return;
+    }
+
     try {
       await this.ingestPdfs();
     } catch (error) {

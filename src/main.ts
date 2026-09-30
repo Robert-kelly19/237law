@@ -14,6 +14,7 @@ async function bootstrap() {
     'WHATSAPP_PHONE_NUMBER_ID',
     'OPENAI_API_KEY',
     'DATABASE_URL',
+    'ADMIN_API_KEY',
   ]);
 
   const app = await NestFactory.create(AppModule);
