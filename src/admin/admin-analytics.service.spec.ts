@@ -36,6 +36,21 @@ describe('AdminAnalyticsService - Daily Users', () => {
     return formatDate(d);
   }
 
+  function startOfWeek(date: Date): Date {
+    const normalized = new Date(date);
+    normalized.setHours(0, 0, 0, 0);
+    const day = normalized.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    normalized.setDate(normalized.getDate() + diff);
+    return normalized;
+  }
+
+  function formatMonth(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+
   function extractSql(mock: jest.Mock): string {
     const sqlArg = mock.mock.calls[0]?.[0];
     if (sqlArg && typeof (sqlArg as any).sql === 'string') {
@@ -86,7 +101,6 @@ describe('AdminAnalyticsService - Daily Users', () => {
     });
 
     it('should count multiple messages from same user on one day as one', async () => {
-      // COUNT(DISTINCT userId) ensures one row per unique user
       mockQueryRaw.mockResolvedValue([
         { date: todayStr(), count: 1n },
       ]);
@@ -178,6 +192,83 @@ describe('AdminAnalyticsService - Daily Users', () => {
       const result = await service.getDailyUsers(3);
 
       expect(result.days[result.days.length - 1].date).toBe(todayStr());
+    });
+  });
+
+  describe('getWeeklyUsers', () => {
+    it('should group by Monday week boundaries and include zero-activity weeks', async () => {
+      const currentWeekStart = startOfWeek(new Date());
+      const previousWeekStart = new Date(currentWeekStart);
+      previousWeekStart.setDate(currentWeekStart.getDate() - 7);
+      const twoWeeksAgoStart = new Date(currentWeekStart);
+      twoWeeksAgoStart.setDate(currentWeekStart.getDate() - 14);
+
+      mockQueryRaw.mockResolvedValue([
+        { week_start: formatDate(previousWeekStart), count: 4n },
+      ]);
+
+      const result = await service.getWeeklyUsers(3);
+
+      expect(result.weeks).toHaveLength(3);
+      expect(result.weeks[0].weekStart).toBe(formatDate(twoWeeksAgoStart));
+      expect(result.weeks[1].weekStart).toBe(formatDate(previousWeekStart));
+      expect(result.weeks[2].weekStart).toBe(formatDate(currentWeekStart));
+      expect(result.weeks[0].users).toBe(0);
+      expect(result.weeks[1].users).toBe(4);
+      expect(result.weeks[2].users).toBe(0);
+    });
+
+    it('should count distinct WhatsApp users and reject invalid week values', async () => {
+      mockQueryRaw.mockResolvedValue([]);
+      await service.getWeeklyUsers(1);
+
+      const sql = extractSql(mockQueryRaw);
+      expect(sql).toContain('date_trunc');
+      expect(sql).toContain('COUNT(DISTINCT ct."userId")');
+      expect(sql).toContain('whatsapp');
+
+      await expect(service.getWeeklyUsers(0)).rejects.toThrow(BadRequestException);
+      await expect(service.getWeeklyUsers(-1)).rejects.toThrow(BadRequestException);
+      await expect(service.getWeeklyUsers(53)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('getMonthlyUsers', () => {
+    it('should group by calendar month and include zero-activity months', async () => {
+      const now = new Date();
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const previousMonthStart = new Date(currentMonthStart);
+      previousMonthStart.setMonth(currentMonthStart.getMonth() - 1);
+      const twoMonthsAgoStart = new Date(currentMonthStart);
+      twoMonthsAgoStart.setMonth(currentMonthStart.getMonth() - 2);
+
+      mockQueryRaw.mockResolvedValue([
+        { month: formatMonth(previousMonthStart), count: 7n },
+      ]);
+
+      const result = await service.getMonthlyUsers(3);
+
+      expect(result.months).toHaveLength(3);
+      expect(result.months[0].month).toBe(formatMonth(twoMonthsAgoStart));
+      expect(result.months[1].month).toBe(formatMonth(previousMonthStart));
+      expect(result.months[2].month).toBe(formatMonth(currentMonthStart));
+      expect(result.months[0].users).toBe(0);
+      expect(result.months[1].users).toBe(7);
+      expect(result.months[2].users).toBe(0);
+    });
+
+    it('should count distinct WhatsApp users and reject invalid month values', async () => {
+      mockQueryRaw.mockResolvedValue([]);
+      await service.getMonthlyUsers(1);
+
+      const sql = extractSql(mockQueryRaw);
+      expect(sql).toContain('TO_CHAR(ct."createdAt", \'YYYY-MM\')');
+      expect(sql).toContain('COUNT(DISTINCT ct."userId")');
+      expect(sql).toContain('whatsapp');
+
+      await expect(service.getMonthlyUsers(0)).rejects.toThrow(BadRequestException);
+      await expect(service.getMonthlyUsers(-1)).rejects.toThrow(BadRequestException);
+      await expect(service.getMonthlyUsers(25)).rejects.toThrow(BadRequestException);
     });
   });
 });

@@ -31,6 +31,11 @@ export class RagService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    if (this.shouldSkipPdfIngestion()) {
+      this.logger.log('Skipping PDF ingestion during test/bootstrap mode');
+      return;
+    }
+
     try {
       await this.ingestPdfs();
     } catch (error) {
@@ -38,11 +43,23 @@ export class RagService implements OnModuleInit {
     }
   }
 
+  private shouldSkipPdfIngestion(): boolean {
+    return (
+      process.env.NODE_ENV === 'test' ||
+      process.env.SKIP_PDF_INGESTION === 'true'
+    );
+  }
+
   async ingestPdfs(): Promise<{
     ingested: string[];
     skipped: string[];
     failed: string[];
   }> {
+    if (this.shouldSkipPdfIngestion()) {
+      this.logger.log('Skipping PDF ingestion because the app is in test/skip mode');
+      return { ingested: [], skipped: [], failed: [] };
+    }
+
     this.logger.log('[RagService] PDF INGESTION STARTED');
 
     const pdfData = await this.pdfService.extractTextsFromPdfs();
