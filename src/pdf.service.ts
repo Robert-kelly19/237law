@@ -27,27 +27,39 @@ export class PdfService {
 
     for (const file of files) {
       const filePath = path.join(pdfsDir, file);
+      let extractedText = '';
+      let parser: PDFParse | undefined;
 
       try {
         this.logger.log(`[PdfService] Processing: ${file}`);
         const dataBuffer = fs.readFileSync(filePath);
 
-        const parser = new PDFParse({ data: dataBuffer });
+        parser = new PDFParse({ data: dataBuffer });
         const data = await parser.getText();
-        await parser.destroy();
-
-        const cleanedText = this.cleanText(data.text);
-        this.logger.log(
-          `[PdfService] Extracted ${cleanedText.length} characters from ${file}`,
-        );
-
-        results.push({
-          source: file,
-          text: cleanedText,
-        });
+        extractedText = this.cleanText(data.text);
       } catch (error) {
-        this.logger.error(`[PdfService] Error parsing ${file}:`, error);
+        this.logger.error(
+          `[PdfService] Error parsing ${file}; extracted 0 characters`,
+          error,
+        );
+      } finally {
+        if (parser) {
+          try {
+            await parser.destroy();
+          } catch (error) {
+            this.logger.error(
+              `[PdfService] Error closing parser for ${file}`,
+              error,
+            );
+            extractedText = '';
+          }
+        }
       }
+
+      this.logger.log(
+        `[PdfService] Extracted ${extractedText.length} characters from ${file}`,
+      );
+      results.push({ source: file, text: extractedText });
     }
 
     return results;

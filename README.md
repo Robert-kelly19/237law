@@ -69,6 +69,22 @@ npm run start:dev
 
 The API will be available at `http://localhost:3000`
 
+## PDF ingestion operations
+
+Apply pending Prisma migrations before deploying an ingestion build:
+
+```bash
+npx prisma migrate deploy
+```
+
+PDF ingestion still runs at application startup unless `SKIP_PDF_INGESTION=true`
+is set. Complete unchanged sources are skipped after extracted chunk hashes are
+verified. `PDF_INGESTION_BATCH_SIZE` controls the number of chunks written per
+transaction (default `25`; allowed range `1`–`100`).
+
+The manual `POST /rag/reingest-all` endpoint requires the `x-admin-api-key`
+header configured by `ADMIN_API_KEY`.
+
 ## API Endpoints
 
 ### 1. Ingest PDF
@@ -206,7 +222,7 @@ The raw SQL for cosine similarity search:
 SELECT '[0.123, 0.456, ...]'::vector as query_embedding;
 
 -- Search similar sections
-SELECT 
+SELECT
   id,
   "lawName",
   "articleNumber",

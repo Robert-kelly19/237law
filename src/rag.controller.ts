@@ -6,10 +6,12 @@ import {
   Query,
   Logger,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { RagService } from './rag.service';
 import { AskQueryDto, SearchQueryDto } from './rag-query.dto';
 import { LegalAgentService } from './agents/legal.agent';
+import { AdminAuthGuard } from './admin/admin-auth.guard';
 
 @Controller('rag')
 export class RagController {
@@ -68,11 +70,10 @@ export class RagController {
         success: true,
         data: response,
       };
-    } catch (error: any) {
-      this.logger.error(
-        `Agent processing error: ${error.message}`,
-        error.stack,
-      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Agent processing error: ${message}`, stack);
       throw error;
     }
   }
@@ -83,6 +84,7 @@ export class RagController {
   private readonly reingestLock = { running: false };
 
   @Post('reingest-all')
+  @UseGuards(AdminAuthGuard)
   async reingestAll() {
     if (this.reingestLock.running) {
       return { success: false, message: 'Ingestion already running' };
@@ -92,7 +94,7 @@ export class RagController {
       this.logger.log('Manual re-ingestion triggered');
       const result = await this.ragService.ingestPdfs();
       return {
-        success: true,
+        success: result.failed.length === 0,
         ingested: result.ingested,
         skipped: result.skipped,
         failed: result.failed,
