@@ -13,6 +13,7 @@ import { MemoryModule } from './memory/memory.module';
 import { UsersModule } from './users/users.module';
 import { AdminModule } from './admin/admin.module';
 import { PrismaModule } from './prisma.module';
+import { AdminAuthGuard } from './admin/admin-auth.guard';
 
 @Module({
   imports: [
@@ -27,6 +28,12 @@ import { PrismaModule } from './prisma.module';
     AdminModule,
   ],
   controllers: [AppController, RagController, WhatsappController],
-  providers: [AppService, PdfService, RagService, WhatsappService],
+  providers: [
+    AppService,
+    PdfService,
+    RagService,
+    WhatsappService,
+    AdminAuthGuard,
+  ],
 })
 export class AppModule {}
