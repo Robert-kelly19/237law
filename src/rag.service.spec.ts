@@ -13,6 +13,10 @@ function hash(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
+function hashBuffer(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
 function makeEmbedding(): number[] {
   return Array.from({ length: 1536 }, () => 0.1);
 }
@@ -30,11 +34,35 @@ function createHarness(options?: {
   text?: string;
   files?: { source: string; text: string }[];
   initialHashes?: string[];
+  initialFileHashes?: Record<string, string>;
 }) {
   const source = 'test-law.pdf';
   const chunks = options?.chunks ?? makeChunks(2);
+  const files = options?.files ?? [
+    {
+      source,
+      text:
+        options?.text ??
+        'This extracted law text is long enough to pass the suspiciously short extraction check and to provide reliable input for chunk generation during this isolated service test.',
+    },
+  ];
   const initialHashes = options?.initialHashes ?? [];
-  const sourceRows = new Map<string, string[]>([[source, [...initialHashes]]]);
+  const sourceRows = new Map<string, string[]>(
+    files.map((file) => [
+      file.source,
+      file.source === source ? [...initialHashes] : [],
+    ]),
+  );
+  const fileBuffers = new Map(
+    files.map((file) => [
+      file.source,
+      Buffer.from(`PDF bytes for ${file.source}`),
+    ]),
+  );
+  const sourceFileHashes = new Map(
+    Object.entries(options?.initialFileHashes ?? {}),
+  );
+  const sourceFileChunkCounts = new Map<string, number>();
   const sourceLocks = new Map<string, string>();
   let insertCalls = 0;
   let failInsertAt: number | null = null;
@@ -59,6 +87,12 @@ function createHarness(options?: {
       if (sql.includes('DELETE FROM law_sections')) {
         sourceRows.set(String(values[0]), []);
         return Promise.resolve(sourceRows.get(String(values[0]))!.length);
+      }
+
+      if (sql.includes('INSERT INTO source_ingestion')) {
+        sourceFileHashes.set(String(values[0]), String(values[1]));
+        sourceFileChunkCounts.set(String(values[0]), Number(values[2]));
+        return Promise.resolve(1);
       }
 
       if (sql.includes('INSERT INTO law_sections')) {
@@ -106,6 +140,23 @@ function createHarness(options?: {
           );
         }
 
+        if (sql.includes('FROM source_ingestion')) {
+          const querySource = String(values[0]);
+          const fileHash = sourceFileHashes.get(querySource);
+          if (fileHash === undefined) {
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([
+            {
+              file_hash: fileHash,
+              chunk_count: (sourceRows.get(querySource) ?? []).length,
+              expected_chunk_count:
+                sourceFileChunkCounts.get(querySource) ??
+                (sourceRows.get(querySource) ?? []).length,
+            },
+          ]);
+        }
+
         throw new Error(`Unexpected query SQL: ${sql}`);
       },
     ),
@@ -119,6 +170,8 @@ function createHarness(options?: {
         const stagedRows = new Map(
           [...sourceRows].map(([key, values]) => [key, [...values]]),
         );
+        const stagedFileHashes = new Map(sourceFileHashes);
+        const stagedFileChunkCounts = new Map(sourceFileChunkCounts);
 
         const txExecute = jest.fn(
           (
@@ -136,6 +189,12 @@ function createHarness(options?: {
               return Promise.resolve(1);
             }
 
+            if (sql.includes('DELETE FROM source_ingestion')) {
+              stagedFileHashes.delete(String(values[0]));
+              stagedFileChunkCounts.delete(String(values[0]));
+              return Promise.resolve(1);
+            }
+
             if (sql.includes('INSERT INTO law_sections')) {
               insertCalls++;
               if (failInsertAt === insertCalls) {
@@ -150,14 +209,50 @@ function createHarness(options?: {
               return Promise.resolve(1);
             }
 
+            if (sql.includes('INSERT INTO source_ingestion')) {
+              stagedFileHashes.set(String(values[0]), String(values[1]));
+              stagedFileChunkCounts.set(String(values[0]), Number(values[2]));
+              return Promise.resolve(1);
+            }
+
             throw new Error(`Unexpected transaction SQL: ${sql}`);
           },
         );
 
-        const result = await callback({ $executeRaw: txExecute });
+        const txQuery = jest.fn(
+          (
+            strings: TemplateStringsArray,
+            ...values: unknown[]
+          ): Promise<unknown[]> => {
+            const sql = strings.join(' ');
+            if (sql.includes('SELECT content_hash')) {
+              const querySource = String(values[0]);
+              return Promise.resolve(
+                (stagedRows.get(querySource) ?? []).map((content_hash) => ({
+                  content_hash,
+                })),
+              );
+            }
+
+            throw new Error(`Unexpected transaction query SQL: ${sql}`);
+          },
+        );
+
+        const result = await callback({
+          $executeRaw: txExecute,
+          $queryRaw: txQuery,
+        } as unknown as MockTx);
         sourceRows.clear();
         for (const [key, values] of stagedRows) {
           sourceRows.set(key, values);
+        }
+        sourceFileHashes.clear();
+        for (const [key, value] of stagedFileHashes) {
+          sourceFileHashes.set(key, value);
+        }
+        sourceFileChunkCounts.clear();
+        for (const [key, value] of stagedFileChunkCounts) {
+          sourceFileChunkCounts.set(key, value);
         }
         return result;
       },
@@ -165,15 +260,12 @@ function createHarness(options?: {
   };
 
   const pdfService = {
-    extractTextsFromPdfs: jest.fn().mockResolvedValue(
-      options?.files ?? [
-        {
-          source,
-          text:
-            options?.text ??
-            'This extracted law text is long enough to pass the suspiciously short extraction check and to provide reliable input for chunk generation during this isolated service test.',
-        },
-      ],
+    listPdfFiles: jest.fn().mockReturnValue(files.map((file) => file.source)),
+    readPdfFile: jest.fn((fileSource: string) => fileBuffers.get(fileSource)!),
+    extractTextFromPdfBuffer: jest.fn((_buffer: Buffer, fileSource: string) =>
+      Promise.resolve(
+        files.find((file) => file.source === fileSource)?.text ?? '',
+      ),
     ),
     chunkText: jest.fn().mockReturnValue(chunks),
     extractMetadata: jest.fn().mockReturnValue({
@@ -200,6 +292,9 @@ function createHarness(options?: {
     pdfService,
     embeddingService,
     sourceRows,
+    sourceFileHashes,
+    sourceFileChunkCounts,
+    fileBuffers,
     sourceLocks,
     setFailInsertAt: (insertNumber: number | null) => {
       failInsertAt = insertNumber;
@@ -213,6 +308,7 @@ function createHarness(options?: {
 describe('RagService PDF ingestion', () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalSkipIngestion = process.env.SKIP_PDF_INGESTION;
+  const originalStartupIngestion = process.env.INGEST_ON_STARTUP;
   const originalOpenAiKey = process.env.OPENAI_API_KEY;
   const originalBatchSize = process.env.PDF_INGESTION_BATCH_SIZE;
 
@@ -220,6 +316,7 @@ describe('RagService PDF ingestion', () => {
     process.env.NODE_ENV = 'production';
     process.env.OPENAI_API_KEY = 'test-key';
     delete process.env.SKIP_PDF_INGESTION;
+    delete process.env.INGEST_ON_STARTUP;
   });
 
   afterAll(() => {
@@ -229,6 +326,11 @@ describe('RagService PDF ingestion', () => {
       delete process.env.SKIP_PDF_INGESTION;
     } else {
       process.env.SKIP_PDF_INGESTION = originalSkipIngestion;
+    }
+    if (originalStartupIngestion === undefined) {
+      delete process.env.INGEST_ON_STARTUP;
+    } else {
+      process.env.INGEST_ON_STARTUP = originalStartupIngestion;
     }
     if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = originalOpenAiKey;
@@ -265,6 +367,9 @@ describe('RagService PDF ingestion', () => {
     );
     expect(harness.sourceRows.get(harness.source)).toEqual(
       harness.chunks.map(hash),
+    );
+    expect(harness.sourceFileHashes.get(harness.source)).toBe(
+      hashBuffer(harness.fileBuffers.get(harness.source)!),
     );
   });
 
@@ -362,6 +467,7 @@ describe('RagService PDF ingestion', () => {
 
     expect(firstResult.failed).toEqual([harness.source]);
     expect(harness.sourceRows.get(harness.source)).toHaveLength(25);
+    expect(harness.sourceFileHashes.has(harness.source)).toBe(false);
 
     harness.setFailInsertAt(null);
     const retryResult = await harness.service.ingestPdfs();
@@ -418,6 +524,45 @@ describe('RagService PDF ingestion', () => {
     expect(harness.embeddingService.generateEmbeddings).toHaveBeenCalledTimes(
       1,
     );
+  });
+
+  it('skips unchanged raw PDF bytes before text extraction', async () => {
+    const harness = createHarness();
+    const fileHash = hashBuffer(harness.fileBuffers.get(harness.source)!);
+    const firstResult = await harness.service.ingestPdfs();
+    expect(firstResult.ingested).toEqual([harness.source]);
+
+    harness.pdfService.extractTextFromPdfBuffer.mockClear();
+    const result = await harness.service.ingestPdfs();
+
+    expect(result.skipped).toEqual([harness.source]);
+    expect(harness.pdfService.extractTextFromPdfBuffer).not.toHaveBeenCalled();
+    expect(harness.sourceFileHashes.get(harness.source)).toBe(fileHash);
+  });
+
+  it('reingests unchanged PDF bytes when the saved chunk count is incomplete', async () => {
+    const harness = createHarness();
+    await harness.service.ingestPdfs();
+    harness.sourceRows.set(harness.source, [hash(harness.chunks[0])]);
+    harness.embeddingService.generateEmbeddings.mockClear();
+
+    const result = await harness.service.ingestPdfs();
+
+    expect(result.ingested).toEqual([harness.source]);
+    expect(harness.embeddingService.generateEmbeddings).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(harness.sourceRows.get(harness.source)).toEqual(
+      harness.chunks.map(hash),
+    );
+  });
+
+  it('does not enable startup ingestion by default', async () => {
+    const harness = createHarness();
+
+    await harness.service.onModuleInit();
+
+    expect(harness.pdfService.listPdfFiles).not.toHaveBeenCalled();
   });
 
   it('uses the configured batch size for bounded transactions', async () => {
