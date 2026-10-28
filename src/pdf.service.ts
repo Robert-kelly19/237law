@@ -11,6 +11,27 @@ export class PdfService {
    * Reads all PDF files from /pdfs and extracts text safely
    */
   async extractTextsFromPdfs(): Promise<{ source: string; text: string }[]> {
+    const files = this.listPdfFiles();
+    const results: { source: string; text: string }[] = [];
+
+    for (const source of files) {
+      try {
+        const buffer = this.readPdfFile(source);
+        const text = await this.extractTextFromPdfBuffer(buffer, source);
+        results.push({ source, text });
+      } catch (error) {
+        this.logger.error(
+          `[PdfService] Error reading ${source}; extracted 0 characters`,
+          error,
+        );
+        results.push({ source, text: '' });
+      }
+    }
+
+    return results;
+  }
+
+  listPdfFiles(): string[] {
     const pdfsDir = path.join(process.cwd(), 'pdfs');
 
     if (!fs.existsSync(pdfsDir)) {
@@ -22,47 +43,49 @@ export class PdfService {
 
     const files = fs.readdirSync(pdfsDir).filter((f) => f.endsWith('.pdf'));
     this.logger.log(`[PdfService] Found ${files.length} PDF files to process`);
+    return files;
+  }
 
-    const results: { source: string; text: string }[] = [];
+  readPdfFile(source: string): Buffer {
+    return fs.readFileSync(path.join(process.cwd(), 'pdfs', source));
+  }
 
-    for (const file of files) {
-      const filePath = path.join(pdfsDir, file);
-      let extractedText = '';
-      let parser: PDFParse | undefined;
+  async extractTextFromPdfBuffer(
+    buffer: Buffer,
+    source: string,
+  ): Promise<string> {
+    let extractedText = '';
+    let parser: PDFParse | undefined;
 
-      try {
-        this.logger.log(`[PdfService] Processing: ${file}`);
-        const dataBuffer = fs.readFileSync(filePath);
+    try {
+      this.logger.log(`[PdfService] Processing: ${source}`);
 
-        parser = new PDFParse({ data: dataBuffer });
-        const data = await parser.getText();
-        extractedText = this.cleanText(data.text);
-      } catch (error) {
-        this.logger.error(
-          `[PdfService] Error parsing ${file}; extracted 0 characters`,
-          error,
-        );
-      } finally {
-        if (parser) {
-          try {
-            await parser.destroy();
-          } catch (error) {
-            this.logger.error(
-              `[PdfService] Error closing parser for ${file}`,
-              error,
-            );
-            extractedText = '';
-          }
+      parser = new PDFParse({ data: buffer });
+      const data = await parser.getText();
+      extractedText = this.cleanText(data.text);
+    } catch (error) {
+      this.logger.error(
+        `[PdfService] Error parsing ${source}; extracted 0 characters`,
+        error,
+      );
+    } finally {
+      if (parser) {
+        try {
+          await parser.destroy();
+        } catch (error) {
+          this.logger.error(
+            `[PdfService] Error closing parser for ${source}`,
+            error,
+          );
+          extractedText = '';
         }
       }
-
-      this.logger.log(
-        `[PdfService] Extracted ${extractedText.length} characters from ${file}`,
-      );
-      results.push({ source: file, text: extractedText });
     }
 
-    return results;
+    this.logger.log(
+      `[PdfService] Extracted ${extractedText.length} characters from ${source}`,
+    );
+    return extractedText;
   }
 
   /**

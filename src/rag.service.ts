@@ -18,6 +18,12 @@ type SourceHashRow = {
   content_hash: string | null;
 };
 
+type SourceIngestionStateRow = {
+  file_hash: string | null;
+  chunk_count: number;
+  expected_chunk_count: number;
+};
+
 type SourceLockRow = {
   source: string;
 };
@@ -62,25 +68,29 @@ export class RagService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
+    if (process.env.INGEST_ON_STARTUP !== 'true') {
+      return;
+    }
+
     if (this.shouldSkipPdfIngestion()) {
       this.logger.log('Skipping PDF ingestion during test/bootstrap mode');
       return;
     }
 
-    try {
-      const result = await this.ingestPdfs();
+    void this.ingestPdfs()
+      .then((result) => {
+        if (result.failed.length > 0) {
+          this.logger.warn(
+            `Startup ingestion finished with ${result.failed.length} failed source(s).`,
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.stack || error.message : String(error);
 
-      if (result.failed.length > 0) {
-        this.logger.warn(
-          `Startup ingestion finished with ${result.failed.length} failed source(s).`,
-        );
-      }
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.stack || error.message : String(error);
-
-      this.logger.error('Fatal error during PDF ingestion', message);
-    }
+        this.logger.error('Fatal error during PDF ingestion', message);
+      });
   }
 
   private shouldSkipPdfIngestion(): boolean {
@@ -109,15 +119,15 @@ export class RagService implements OnModuleInit {
     const skipped: string[] = [];
     const failed: string[] = [];
 
-    let pdfData: { source: string; text: string }[];
+    let sources: string[];
 
     try {
-      pdfData = await this.pdfService.extractTextsFromPdfs();
-      this.logger.log(`[RagService] Extracted ${pdfData.length} PDFs`);
+      sources = this.pdfService.listPdfFiles();
+      this.logger.log(`[RagService] Found ${sources.length} PDFs`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
-      this.logger.error(`Failed to extract PDF texts: ${message}`);
+      this.logger.error(`Failed to list PDF files: ${message}`);
 
       return {
         ingested,
@@ -126,11 +136,11 @@ export class RagService implements OnModuleInit {
       };
     }
 
-    for (const { source, text } of pdfData) {
+    for (const source of sources) {
       this.logger.log(`[RagService] Processing source: ${source}`);
 
       try {
-        const outcome = await this.ingestSource(source, text);
+        const outcome = await this.ingestSource(source);
         if (outcome === 'skipped') {
           this.logger.log(
             `[RagService] Source is complete and unchanged; skipping: ${source}`,
@@ -170,14 +180,28 @@ export class RagService implements OnModuleInit {
     return { ingested, skipped, failed };
   }
 
-  private async ingestSource(
-    source: string,
-    text: string,
-  ): Promise<'ingested' | 'skipped'> {
+  private async ingestSource(source: string): Promise<'ingested' | 'skipped'> {
     const lockToken = await this.acquireSourceLock(source);
     const heartbeat = this.startSourceLockHeartbeat(source, lockToken);
 
     try {
+      const pdfBuffer = this.pdfService.readPdfFile(source);
+      const fileHash = this.computeFileHash(pdfBuffer);
+      const ingestionState = await this.getSourceIngestionState(source);
+
+      if (
+        ingestionState?.file_hash === fileHash &&
+        ingestionState.chunk_count > 0 &&
+        ingestionState.chunk_count === ingestionState.expected_chunk_count
+      ) {
+        heartbeat.assertActive();
+        return 'skipped';
+      }
+
+      const text = await this.pdfService.extractTextFromPdfBuffer(
+        pdfBuffer,
+        source,
+      );
       const extractedText = typeof text === 'string' ? text.trim() : '';
 
       this.logger.log(
@@ -210,6 +234,12 @@ export class RagService implements OnModuleInit {
 
       if (this.sameHashMultiset(existingHashes, expectedHashes)) {
         heartbeat.assertActive();
+        await this.saveSourceFileHash(
+          source,
+          fileHash,
+          expectedHashes,
+          lockToken,
+        );
         return 'skipped';
       }
 
@@ -250,6 +280,10 @@ export class RagService implements OnModuleInit {
             await this.refreshSourceLock(tx, source, lockToken);
             await tx.$executeRaw`
               DELETE FROM law_sections
+              WHERE source = ${source}
+            `;
+            await tx.$executeRaw`
+              DELETE FROM source_ingestion
               WHERE source = ${source}
             `;
           },
@@ -298,6 +332,29 @@ export class RagService implements OnModuleInit {
                   ${vector}::vector(1536)
                 )
               `;
+            }
+
+            if (end === chunks.length) {
+              const savedRows = await tx.$queryRaw<SourceHashRow[]>`
+                SELECT content_hash
+                FROM law_sections
+                WHERE source = ${source}
+                ORDER BY content_hash
+              `;
+              const savedHashes = savedRows.map((row) => row.content_hash);
+
+              if (!this.sameHashMultiset(savedHashes, expectedHashes)) {
+                throw new Error(
+                  `Chunk verification failed before recording file hash for ${source}`,
+                );
+              }
+
+              await this.upsertSourceFileHash(
+                tx,
+                source,
+                fileHash,
+                expectedHashes.length,
+              );
             }
           },
           {
@@ -444,6 +501,82 @@ export class RagService implements OnModuleInit {
     return rows.map((row) => row.content_hash);
   }
 
+  private async getSourceIngestionState(
+    source: string,
+  ): Promise<SourceIngestionStateRow | undefined> {
+    const rows = await this.prisma.$queryRaw<SourceIngestionStateRow[]>`
+      SELECT
+        file_hash,
+        (
+          SELECT COUNT(*)::int
+          FROM law_sections
+          WHERE law_sections.source = source_ingestion.source
+        ) AS chunk_count,
+        source_ingestion.chunk_count AS expected_chunk_count
+      FROM source_ingestion
+      WHERE source = ${source}
+    `;
+
+    return rows[0];
+  }
+
+  private async saveSourceFileHash(
+    source: string,
+    fileHash: string,
+    expectedHashes: string[],
+    lockToken: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(
+      async (tx) => {
+        await this.refreshSourceLock(tx, source, lockToken);
+        const rows = await tx.$queryRaw<SourceHashRow[]>`
+          SELECT content_hash
+          FROM law_sections
+          WHERE source = ${source}
+          ORDER BY content_hash
+        `;
+
+        if (
+          !this.sameHashMultiset(
+            rows.map((row) => row.content_hash),
+            expectedHashes,
+          )
+        ) {
+          throw new Error(
+            `Chunk verification failed before recording file hash for ${source}`,
+          );
+        }
+
+        await this.upsertSourceFileHash(
+          tx,
+          source,
+          fileHash,
+          expectedHashes.length,
+        );
+      },
+      {
+        maxWait: this.batchMaxWaitMs,
+        timeout: this.batchTimeoutMs,
+      },
+    );
+  }
+
+  private async upsertSourceFileHash(
+    tx: Pick<PrismaService, '$executeRaw'>,
+    source: string,
+    fileHash: string,
+    chunkCount: number,
+  ): Promise<void> {
+    await tx.$executeRaw`
+      INSERT INTO source_ingestion (source, file_hash, chunk_count, updated_at)
+      VALUES (${source}, ${fileHash}, ${chunkCount}, CURRENT_TIMESTAMP)
+      ON CONFLICT (source) DO UPDATE
+      SET file_hash = EXCLUDED.file_hash,
+          chunk_count = EXCLUDED.chunk_count,
+          updated_at = CURRENT_TIMESTAMP
+    `;
+  }
+
   private sameHashMultiset(
     actual: (string | null)[],
     expected: string[],
@@ -488,6 +621,10 @@ export class RagService implements OnModuleInit {
 
   private computeContentHash(content: string): string {
     return createHash('sha256').update(content, 'utf8').digest('hex');
+  }
+
+  private computeFileHash(buffer: Buffer): string {
+    return createHash('sha256').update(buffer).digest('hex');
   }
 
   async searchRelevantSections(query: string): Promise<LawSectionResult[]> {

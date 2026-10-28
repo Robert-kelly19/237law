@@ -77,10 +77,18 @@ Apply pending Prisma migrations before deploying an ingestion build:
 npx prisma migrate deploy
 ```
 
-PDF ingestion still runs at application startup unless `SKIP_PDF_INGESTION=true`
-is set. Complete unchanged sources are skipped after extracted chunk hashes are
-verified. `PDF_INGESTION_BATCH_SIZE` controls the number of chunks written per
-transaction (default `25`; allowed range `1`–`100`).
+PDF ingestion is off at startup by default. Set `INGEST_ON_STARTUP=true` only
+for local development to opt into background startup ingestion. For deployment,
+run `npm run ingest` after building; unchanged PDFs are skipped by their raw
+file hash before text extraction. `PDF_INGESTION_BATCH_SIZE` controls the number
+of chunks written per transaction (default `25`; allowed range `1`–`100`).
+
+Use this Render build command to generate Prisma, apply migrations, build, and
+ingest PDFs once per deploy:
+
+```bash
+npm install && npx prisma generate && npx prisma migrate deploy && npm run build && npm run ingest
+```
 
 The manual `POST /rag/reingest-all` endpoint requires the `x-admin-api-key`
 header configured by `ADMIN_API_KEY`.

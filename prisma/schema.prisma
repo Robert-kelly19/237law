@@ -29,6 +29,15 @@ model SourceIngestionLock {
   @@map("source_ingestion_lock")
 }
 
+model SourceIngestion {
+  source     String   @id
+  fileHash   String?  @map("file_hash")
+  chunkCount Int      @map("chunk_count")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("source_ingestion")
+}
+
 model ConversationTurn {
   id              String    @id @default(cuid())
   userId          String    // WhatsApp ID or user identifier
