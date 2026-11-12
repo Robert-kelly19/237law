@@ -69,6 +69,21 @@ npm run start:dev
 
 The API will be available at `http://localhost:3000`
 
+## WhatsApp voice notes
+
+The WhatsApp webhook accepts voice messages at `/webhook` (the existing
+`/whatsapp/webhook` path remains available). Configure `WHATSAPP_TOKEN`,
+`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION` (defaults to `v21.0`),
+`WHATSAPP_VERIFY_TOKEN`, and `OPENAI_API_KEY` in the environment. The legacy
+`WHATSAPP_ACCESS_TOKEN` variable is accepted as a fallback for existing
+installations.
+
+Voice messages are processed asynchronously by BullMQ. Run Redis and configure
+`REDIS_HOST`, `REDIS_PORT`, and optionally `REDIS_PASSWORD`. The worker requires
+`ffmpeg` with `libopus` support available on the host. Subscribe the Meta
+webhook to the `messages` field and use a permanent system-user access token
+for production.
+
 ## PDF ingestion operations
 
 Apply pending Prisma migrations before deploying an ingestion build:
