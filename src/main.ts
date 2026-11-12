@@ -10,6 +10,7 @@ async function bootstrap() {
   validateRequiredEnvVars(
     [
       'WHATSAPP_VERIFY_TOKEN',
+      'WHATSAPP_APP_SECRET',
       'WHATSAPP_PHONE_NUMBER_ID',
       'OPENAI_API_KEY',
       'DATABASE_URL',
@@ -18,7 +19,7 @@ async function bootstrap() {
     [['WHATSAPP_TOKEN', 'WHATSAPP_ACCESS_TOKEN']],
   );
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   const Port = process.env.PORT ?? 3000;
 

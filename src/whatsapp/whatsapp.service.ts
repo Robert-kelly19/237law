@@ -19,6 +19,8 @@ interface WhatsappMediaResponse {
   id: string;
 }
 
+const OGG_OPUS_MIME_TYPE = 'audio/ogg; codecs=opus';
+
 interface WhatsappTextMessagePayload {
   messaging_product: 'whatsapp';
   to: string;
@@ -176,10 +178,10 @@ export class WhatsappService {
       const { token, baseUrl, phoneNumberId } = this.getWhatsappRequestConfig();
       const form = new FormData();
       form.append('messaging_product', 'whatsapp');
-      form.append('type', 'audio/ogg');
+      form.append('type', OGG_OPUS_MIME_TYPE);
       form.append('file', audio, {
         filename: 'reply.ogg',
-        contentType: 'audio/ogg',
+        contentType: OGG_OPUS_MIME_TYPE,
       });
 
       const response =

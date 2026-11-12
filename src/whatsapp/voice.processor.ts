@@ -10,6 +10,7 @@ import { WhatsappService } from './whatsapp.service';
 interface VoiceJobData {
   from: string;
   mediaId: string;
+  sendStatus?: 'sending' | 'sent';
 }
 
 @Processor('voice')
@@ -30,6 +31,14 @@ export class VoiceProcessor extends WorkerHost {
     const { from, mediaId } = job.data;
 
     try {
+      // Avoid duplicate delivery if a previous send may have reached Meta.
+      if (job.data.sendStatus) {
+        if (job.data.sendStatus === 'sent') return;
+        throw new Error(
+          'Previous voice-note send outcome is unknown; avoiding duplicate delivery',
+        );
+      }
+
       // Limit paid voice requests per sender, while allowing retries of this job.
       if (!job.id) throw new Error('Voice job is missing its job ID');
       const allowed = await this.rateLimiter.tryAcquire(from, job.id);
@@ -69,13 +78,25 @@ export class VoiceProcessor extends WorkerHost {
       const uploadedMediaId =
         await this.whatsappService.uploadAudio(replyAudio);
 
+      // Persist the attempt before sending so retries cannot duplicate a possibly accepted note.
+      await job.updateData({ ...job.data, sendStatus: 'sending' });
+
       // Send the uploaded voice note back to the original sender.
       await this.whatsappService.sendAudio(from, uploadedMediaId);
+      try {
+        await job.updateData({ ...job.data, sendStatus: 'sent' });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Voice note was sent, but its job outcome could not be recorded: ${message}`,
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Voice job ${job.id ?? 'unknown'} failed: ${message}`);
 
-      if (job.attemptsMade === 0) {
+      const maxAttempts = job.opts.attempts ?? 1;
+      if (job.attemptsMade + 1 >= maxAttempts) {
         try {
           await this.whatsappService.send(
             from,

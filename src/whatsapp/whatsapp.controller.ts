@@ -9,11 +9,15 @@ import {
   HttpStatus,
   Logger,
   OnModuleDestroy,
+  UnauthorizedException,
+  Req,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
 import { LegalAgentService } from '../agents/legal.agent';
 import { ConversationService } from '../memory/conversation.service';
@@ -119,30 +123,14 @@ export class WhatsappController implements OnModuleDestroy {
 
   @Post(['webhook', 'whatsapp/webhook'])
   @HttpCode(HttpStatus.OK)
-  async receiveMessage(@Body() body: WhatsappWebhookBody) {
+  async receiveMessage(
+    @Body() body: WhatsappWebhookBody,
+    @Req() request: RawBodyRequest<Request>,
+  ) {
+    this.verifyWebhookSignature(request);
     this.logger.log(`Incoming webhook`);
 
     if (!body?.entry) {
-      return { status: 'EVENT_RECEIVED' };
-    }
-
-    const firstMessage = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (firstMessage?.type === 'audio') {
-      if (!firstMessage.from || !firstMessage.id || !firstMessage.audio?.id) {
-        this.logger.warn(
-          'Skipping audio message with missing sender or media data',
-        );
-        return { status: 'EVENT_RECEIVED' };
-      }
-
-      this.logger.log(
-        `Incoming audio message from ${maskMsisdn(firstMessage.from)}`,
-      );
-      await this.voiceQueue.add(
-        'voice',
-        { from: firstMessage.from, mediaId: firstMessage.audio.id },
-        { jobId: firstMessage.id },
-      );
       return { status: 'EVENT_RECEIVED' };
     }
 
@@ -156,6 +144,23 @@ export class WhatsappController implements OnModuleDestroy {
           const messageId = message.id;
           const from = message.from;
           const text = message.text?.body;
+
+          if (message.type === 'audio') {
+            if (!from || !messageId || !message.audio?.id) {
+              this.logger.warn(
+                'Skipping audio message with missing sender or media data',
+              );
+              continue;
+            }
+
+            this.logger.log(`Incoming audio message from ${maskMsisdn(from)}`);
+            await this.voiceQueue.add(
+              'voice',
+              { from, mediaId: message.audio.id },
+              { jobId: messageId },
+            );
+            continue;
+          }
 
           if (from && text) {
             this.logger.log(`Incoming text message from ${maskMsisdn(from)}`);
@@ -225,6 +230,31 @@ export class WhatsappController implements OnModuleDestroy {
     }
 
     return { status: 'EVENT_RECEIVED' };
+  }
+
+  private verifyWebhookSignature(request: RawBodyRequest<Request>): void {
+    const signature = request.header('x-hub-signature-256');
+    const rawBody = request.rawBody;
+    const appSecret = this.configService.get<string>('WHATSAPP_APP_SECRET');
+
+    if (
+      !signature ||
+      !rawBody ||
+      !appSecret ||
+      !/^sha256=[a-f\d]{64}$/i.test(signature)
+    ) {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+
+    const expected = createHmac('sha256', appSecret).update(rawBody).digest();
+    const received = Buffer.from(signature.slice('sha256='.length), 'hex');
+
+    if (
+      received.length !== expected.length ||
+      !timingSafeEqual(received, expected)
+    ) {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
   }
 
   /**
