@@ -4,8 +4,6 @@ import { AppService } from './app.service';
 import { PdfService } from './pdf.service';
 import { RagService } from './rag.service';
 import { RagController } from './rag.controller';
-import { WhatsappController } from './whatsapp/whatsapp.controller';
-import { WhatsappService } from './whatsapp/whatsapp.service';
 import { ConfigModule } from '@nestjs/config';
 import { CommonModule } from './common/common.module';
 import { AgentsModule } from './agents/agents.module';
@@ -14,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { AdminModule } from './admin/admin.module';
 import { PrismaModule } from './prisma.module';
 import { AdminAuthGuard } from './admin/admin-auth.guard';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -26,14 +25,9 @@ import { AdminAuthGuard } from './admin/admin-auth.guard';
     MemoryModule,
     UsersModule,
     AdminModule,
+    WhatsappModule,
   ],
-  controllers: [AppController, RagController, WhatsappController],
-  providers: [
-    AppService,
-    PdfService,
-    RagService,
-    WhatsappService,
-    AdminAuthGuard,
-  ],
+  controllers: [AppController, RagController],
+  providers: [AppService, PdfService, RagService, AdminAuthGuard],
 })
 export class AppModule {}

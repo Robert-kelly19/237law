@@ -69,6 +69,29 @@ npm run start:dev
 
 The API will be available at `http://localhost:3000`
 
+## WhatsApp voice notes
+
+The WhatsApp webhook accepts voice messages at `/webhook` (the existing
+`/whatsapp/webhook` path remains available). Configure `WHATSAPP_TOKEN`,
+`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION` (defaults to `v21.0`),
+`WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, and `OPENAI_API_KEY` in the
+environment. `WHATSAPP_APP_SECRET` is the Meta app secret used to validate
+`X-Hub-Signature-256` against the request's raw body; it is distinct from the
+webhook verify token and the WhatsApp access token. Set it from your Meta app's
+App Secret in the app settings. Invalid or missing signatures are rejected. The legacy
+`WHATSAPP_ACCESS_TOKEN` variable is accepted as a fallback for existing
+installations.
+
+Voice messages are processed asynchronously by BullMQ. Run Redis and configure
+`REDIS_HOST`, `REDIS_PORT`, and optionally `REDIS_PASSWORD`. The worker requires
+`ffmpeg` with `libopus` support available on the host. Subscribe the Meta
+webhook to the `messages` field and use a permanent system-user access token
+for production. Completed voice jobs are retained for seven days (up to one
+million jobs) to cover the webhook media-ID availability window and deduplicate
+redeliveries; failed jobs are retained for up to 30 days (up to 100,000 jobs).
+Meta's Media API accepts OGG audio only with the Opus codec; uploads therefore
+use `audio/ogg; codecs=opus`.
+
 ## PDF ingestion operations
 
 Apply pending Prisma migrations before deploying an ingestion build:

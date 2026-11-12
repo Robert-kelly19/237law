@@ -9,8 +9,15 @@ import {
   HttpStatus,
   Logger,
   OnModuleDestroy,
+  UnauthorizedException,
+  Req,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { RawBodyRequest } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
+import { ConfigService } from '@nestjs/config';
+import type { Request, Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
 import { LegalAgentService } from '../agents/legal.agent';
 import { ConversationService } from '../memory/conversation.service';
@@ -19,7 +26,7 @@ import { maskMsisdn } from '../common/mask-msisdn';
 
 interface WhatsappWebhookBody {
   object?: string;
-  entry: WebhookEntry[];
+  entry?: WebhookEntry[];
 }
 
 interface WebhookEntry {
@@ -34,7 +41,7 @@ interface WebhookChange {
 interface WebhookValue {
   messaging_product?: string;
   metadata?: WebhookMetadata;
-  contacts?: any[];
+  contacts?: unknown[];
   messages?: WebhookMessage[];
 }
 
@@ -49,14 +56,23 @@ interface WebhookMessage {
   timestamp?: string;
   text?: WebhookText;
   type?: string;
-  [key: string]: any;
+  audio?: WebhookAudio;
+}
+
+interface WebhookAudio {
+  id?: string;
 }
 
 interface WebhookText {
   body?: string;
 }
 
-@Controller('whatsapp')
+interface VoiceJobData {
+  from: string;
+  mediaId: string;
+}
+
+@Controller()
 export class WhatsappController implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsappController.name);
 
@@ -77,25 +93,26 @@ export class WhatsappController implements OnModuleDestroy {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(
-    private whatsappService: WhatsappService,
-    private legalAgent: LegalAgentService,
-    private conversationService: ConversationService,
-    private platformUserService: PlatformUserService,
+    private readonly whatsappService: WhatsappService,
+    private readonly legalAgent: LegalAgentService,
+    private readonly conversationService: ConversationService,
+    private readonly platformUserService: PlatformUserService,
+    private readonly configService: ConfigService,
+    @InjectQueue('voice') private readonly voiceQueue: Queue<VoiceJobData>,
   ) {
     // Start background cleanup task
     this.startCleanupTask();
   }
 
-  @Get('webhook')
+  @Get(['webhook', 'whatsapp/webhook'])
   verifyWebhook(
-    @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
     @Query('hub.challenge') challenge: string,
     @Res() res: Response,
   ) {
-    const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+    const verifyToken = this.configService.get<string>('WHATSAPP_VERIFY_TOKEN');
 
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    if (token === verifyToken) {
       this.logger.log('Webhook verified successfully');
       res.status(HttpStatus.OK).send(challenge);
     } else {
@@ -104,9 +121,13 @@ export class WhatsappController implements OnModuleDestroy {
     }
   }
 
-  @Post('webhook')
+  @Post(['webhook', 'whatsapp/webhook'])
   @HttpCode(HttpStatus.OK)
-  async receiveMessage(@Body() body: WhatsappWebhookBody) {
+  async receiveMessage(
+    @Body() body: WhatsappWebhookBody,
+    @Req() request: RawBodyRequest<Request>,
+  ) {
+    this.verifyWebhookSignature(request);
     this.logger.log(`Incoming webhook`);
 
     if (!body?.entry) {
@@ -123,6 +144,27 @@ export class WhatsappController implements OnModuleDestroy {
           const messageId = message.id;
           const from = message.from;
           const text = message.text?.body;
+
+          if (message.type === 'audio') {
+            if (!from || !messageId || !message.audio?.id) {
+              this.logger.warn(
+                'Skipping audio message with missing sender or media data',
+              );
+              continue;
+            }
+
+            this.logger.log(`Incoming audio message from ${maskMsisdn(from)}`);
+            await this.voiceQueue.add(
+              'voice',
+              { from, mediaId: message.audio.id },
+              { jobId: messageId },
+            );
+            continue;
+          }
+
+          if (from && text) {
+            this.logger.log(`Incoming text message from ${maskMsisdn(from)}`);
+          }
 
           if (!from || !text) continue;
 
@@ -165,7 +207,7 @@ export class WhatsappController implements OnModuleDestroy {
 
           // Process the message through the legal agent and send the response
           try {
-            await this.processMessage(from, text, messageId);
+            await this.processMessage(from, text);
           } catch (err: any) {
             this.logger.error(
               `Error processing message: ${err instanceof Error ? err.message : String(err)}`,
@@ -190,6 +232,31 @@ export class WhatsappController implements OnModuleDestroy {
     return { status: 'EVENT_RECEIVED' };
   }
 
+  private verifyWebhookSignature(request: RawBodyRequest<Request>): void {
+    const signature = request.header('x-hub-signature-256');
+    const rawBody = request.rawBody;
+    const appSecret = this.configService.get<string>('WHATSAPP_APP_SECRET');
+
+    if (
+      !signature ||
+      !rawBody ||
+      !appSecret ||
+      !/^sha256=[a-f\d]{64}$/i.test(signature)
+    ) {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+
+    const expected = createHmac('sha256', appSecret).update(rawBody).digest();
+    const received = Buffer.from(signature.slice('sha256='.length), 'hex');
+
+    if (
+      received.length !== expected.length ||
+      !timingSafeEqual(received, expected)
+    ) {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+  }
+
   /**
    * Check if a message has already been processed
    */
@@ -211,11 +278,7 @@ export class WhatsappController implements OnModuleDestroy {
    * Process an incoming message through the legal agent and send the response.
    * Sent messages are always in direct response to a received webhook.
    */
-  private async processMessage(
-    from: string,
-    text: string,
-    messageId: string,
-  ): Promise<void> {
+  private async processMessage(from: string, text: string): Promise<void> {
     try {
       const sessionId = await this.conversationService.getOrCreateSession(from);
       const response = await this.legalAgent.processQuery({

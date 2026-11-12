@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { CommonModule } from '../common/common.module';
 import { PrismaModule } from '../prisma.module';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -9,7 +10,7 @@ import { AdminBroadcastController } from './admin-broadcast.controller';
 import { AdminBroadcastService } from './admin-broadcast.service';
 
 @Module({
-  imports: [PrismaModule, CommonModule],
+  imports: [PrismaModule, CommonModule, HttpModule],
   controllers: [AdminAnalyticsController, AdminBroadcastController],
   providers: [
     AdminAnalyticsService,
